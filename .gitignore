@@ -1,0 +1,13 @@
+/target
+.direnv
+.venv
+.output.txt
+.envrc
+data/
+
+# SAM deployment config and build artifacts
+infra/sam/samconfig.toml
+infra/sam/.aws-sam/
+infra/sam/artifacts/
+
+**/node_modules

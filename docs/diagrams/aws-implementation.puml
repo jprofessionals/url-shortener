@@ -1,0 +1,57 @@
+@startuml
+skinparam componentStyle uml2
+skinparam packageStyle rectangle
+skinparam component {
+  BackgroundColor<<AWS>> orange
+  BackgroundColor<<External>> lightblue
+  BackgroundColor<<Storage>> lightgreen
+}
+
+actor User as "User / Visitor"
+actor Admin as "Admin"
+
+package "External Services" {
+    component "Google Identity\n(OIDC)" as GoogleAuth <<External>>
+}
+
+package "AWS Cloud" {
+    component "Amazon CloudFront\n(s.jpro.dev)" as CloudFront <<AWS>>
+
+    package "Compute Layer" {
+        component "AWS Lambda\n(Rust Binary)" as Lambda <<AWS>> {
+            rectangle "Hexagonal Core" {
+                [API Adapter\n(lambda_http)] as Adapter
+                [Analytics Port] as AnalyticsPort
+                [Auth Port] as AuthPort
+            }
+        }
+    }
+
+    package "Storage & Analytics" {
+        database "Amazon DynamoDB\n(Links & Counters)" as DynamoDB <<Storage>>
+        database "Amazon CloudWatch\n(Logs & Insights)" as CloudWatch <<Storage>>
+    }
+}
+
+' Relations
+User -> CloudFront : HTTPS GET /<slug>
+Admin -> CloudFront : HTTPS GET/POST /api/*
+
+CloudFront -> Adapter : Invoke (Function URL)
+Adapter -> Core
+
+' Internal Lambda connections
+Core --> StoragePort
+StoragePort --> DynamoDB : Get/Put Item
+
+Core --> AnalyticsPort
+AnalyticsPort..> CloudWatch : Async Log (EMF)
+
+Core --> AuthPort
+AuthPort --> GoogleAuth : Verify JWT (JWKS)
+
+' Admin Stats Flow
+Admin..> CloudWatch : (Via API) Query Logs
+Lambda..> CloudWatch : StartQuery / GetQueryResults
+
+@enduml

@@ -1,0 +1,52 @@
+# SAM CLI Configuration
+# Copy this file to samconfig.toml and fill in your values
+#
+# Usage:
+#   sam deploy                    # Deploy dev (default)
+#   sam deploy --config-env prod  # Deploy prod
+
+version = 0.1
+
+# =============================================================================
+# Development environment (default)
+# =============================================================================
+[default.deploy.parameters]
+stack_name = "url-shortener-dev"
+resolve_s3 = true
+s3_prefix = "url-shortener-dev"
+region = "eu-north-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+
+parameter_overrides = """
+  StageName="dev"
+  AllowedDomain="YOUR_GOOGLE_WORKSPACE_DOMAIN"
+  GoogleOAuthClientId="YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+  ShortlinkDomain="https://dev-short.yourdomain.com"
+  CorsAllowOrigin="https://dev-admin.yourdomain.com"
+  CustomDomainName="dev-short.yourdomain.com"
+  CustomDomainCertificateArn="arn:aws:acm:REGION:ACCOUNT_ID:certificate/CERTIFICATE_ID"
+  AdminEmails="admin@yourdomain.com"
+"""
+
+# =============================================================================
+# Production environment
+# =============================================================================
+[prod.deploy.parameters]
+stack_name = "url-shortener-prod"
+resolve_s3 = true
+s3_prefix = "url-shortener-prod"
+region = "eu-north-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+
+parameter_overrides = """
+  StageName="prod"
+  AllowedDomain="YOUR_GOOGLE_WORKSPACE_DOMAIN"
+  GoogleOAuthClientId="YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+  ShortlinkDomain="https://short.yourdomain.com"
+  CorsAllowOrigin="https://admin.yourdomain.com"
+  CustomDomainName="short.yourdomain.com"
+  CustomDomainCertificateArn="arn:aws:acm:REGION:ACCOUNT_ID:certificate/CERTIFICATE_ID"
+  AdminEmails="admin@yourdomain.com"
+"""

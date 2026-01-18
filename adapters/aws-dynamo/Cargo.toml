@@ -1,0 +1,12 @@
+[package]
+name = "aws-dynamo"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../../domain" }
+# Keep AWS deps local to this crate; api-server only pulls them via feature
+aws-config = "1"
+aws-sdk-dynamodb = "1"
+aws-smithy-types = "1"
+tokio.workspace = true

@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>URL Shortener · Admin</title>
+    <link rel="icon" href="data:," />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="config.js"></script>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 2rem; }
+      .row { display: flex; gap: 1rem; align-items: center; }
+      input[type=text], input[type=url] { padding: .5rem; width: 28rem; max-width: 90vw; }
+      button { padding: .6rem 1rem; }
+      .card { border: 1px solid #ddd; padding: 1rem; border-radius: .5rem; margin-bottom: 1rem; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid #ddd; padding: .5rem; }
+      .muted { color: #666; font-size: .9rem; }
+      .copy-btn { padding: 2px 6px; font-size: .8rem; cursor: pointer; border: 1px solid #ccc; background: #f8f8f8; border-radius: 3px; margin-left: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Admin · URL Shortener</h1>
+
+    <details class="card" style="cursor:pointer;">
+      <summary style="font-weight:600;">Usage Tips</summary>
+      <div style="margin-top:.75rem;">
+        <h4 style="margin-bottom:.5rem; color:#333;">URL Suffixes</h4>
+        <p class="muted" style="margin-bottom:.5rem;">Append these to any short URL to change behavior:</p>
+        <ul style="padding-left:1.25rem; line-height:1.6; margin-bottom:1rem;">
+          <li><code>/abc123</code> — Direct redirect to destination</li>
+          <li><code>/abc123<strong>+</strong></code> — Preview page showing link info, click count, and destination before redirecting</li>
+          <li><code>/abc123<strong>.qr</strong></code> — QR code image (SVG) pointing to the short URL</li>
+          <li><code>/abc123<strong>+.qr</strong></code> — QR code that opens the preview page (combine suffixes)</li>
+        </ul>
+
+        <h4 style="margin-bottom:.5rem; color:#333;">Link Features</h4>
+        <ul style="padding-left:1.25rem; line-height:1.6; margin-bottom:1rem;">
+          <li><strong>Custom alias:</strong> Enter a custom slug when creating (3-32 chars, alphanumeric/hyphen/underscore)</li>
+          <li><strong>Description:</strong> Add notes visible in admin and on preview pages</li>
+          <li><strong>Expiration:</strong> Set an expiration date — expired links return 410 Gone</li>
+          <li><strong>Scheduled activation:</strong> Set a future date when the link becomes active</li>
+          <li><strong>Deactivate:</strong> Temporarily disable a link — inactive links return 404</li>
+          <li><strong>Countdown redirect:</strong> Set a delay (seconds) to show a countdown page before redirecting</li>
+        </ul>
+
+        <h4 style="margin-bottom:.5rem; color:#333;">QR Codes</h4>
+        <ul style="padding-left:1.25rem; line-height:1.6; margin-bottom:1rem;">
+          <li>Click the <strong>QR</strong> button to generate a QR code for any link</li>
+          <li>Choose <strong>Direct</strong> for immediate redirect or <strong>Preview</strong> to show link info first</li>
+          <li>Download as SVG for print or digital use</li>
+        </ul>
+
+        <h4 style="margin-bottom:.5rem; color:#333;">Groups</h4>
+        <ul style="padding-left:1.25rem; line-height:1.6;">
+          <li>Create groups to organize links and collaborate with team members</li>
+          <li>Assign links to groups when creating or editing</li>
+          <li>Roles: <strong>Viewer</strong> (read-only), <strong>Editor</strong> (create/edit), <strong>Admin</strong> (full control)</li>
+        </ul>
+      </div>
+    </details>
+
+    <div id="auth" class="card">
+      <div id="auth-google">
+        <div id="g_id_onload"
+             data-client_id=""
+             data-callback="onGoogleSignIn"
+             data-ux_mode="popup"></div>
+        <div class="g_id_signin" data-type="standard" data-size="large"></div>
+      </div>
+      <div id="auth-debug" style="display:none;" class="row">
+        <label for="debugEmail">Debug email:</label>
+        <input id="debugEmail" type="text" placeholder="user@example.com" />
+        <button id="useDebug">Use</button>
+        <span class="muted">(AUTH disabled mode)</span>
+      </div>
+    </div>
+
+    <div id="app" style="display:none;">
+      <div id="userInfo" class="muted" style="margin-bottom:1rem;"></div>
+
+      <div class="card">
+        <h3>Create short link</h3>
+        <div class="row" style="margin-bottom:.5rem;">
+          <input id="orig" type="url" placeholder="https://example.com/..." />
+          <input id="alias" type="text" placeholder="custom alias (optional)" style="width:12rem;" />
+          <input id="createDesc" type="text" placeholder="description (optional)" style="width:14rem;" />
+          <select id="createGroup" style="width:10rem;">
+            <option value="">No group</option>
+          </select>
+          <button id="createBtn">Create</button>
+        </div>
+        <div id="createOut" class="muted" style="margin-top:.5rem;"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin-bottom:.75rem;">
+          <h3 style="margin-right:auto">Links</h3>
+          <input id="searchInput" type="text" placeholder="Search..." style="width:12rem;" />
+          <label for="filterByGroup" class="muted">Group:</label>
+          <select id="filterByGroup" style="width:10rem;">
+            <option value="">All groups</option>
+          </select>
+          <label for="filterBy" class="muted">Creator:</label>
+          <select id="filterBy">
+            <option value="">All</option>
+          </select>
+          <button id="refresh">Refresh</button>
+        </div>
+        <div id="bulkActions" class="row" style="margin-bottom:.5rem; display:none;">
+          <span id="selectedCount" class="muted">0 selected</span>
+          <button id="bulkActivate">Activate</button>
+          <button id="bulkDeactivate">Deactivate</button>
+          <button id="bulkDelete" style="background:#dc3545; color:white;">Delete</button>
+        </div>
+        <div id="paginationTop" class="row" style="margin-bottom:.5rem; display:none;">
+          <span id="totalLinks" class="muted"></span>
+          <button id="prevPage" disabled>Prev</button>
+          <span id="pageInfo" class="muted">Page 1</span>
+          <button id="nextPage">Next</button>
+        </div>
+        <table id="listTbl">
+          <thead><tr><th><input type="checkbox" id="selectAll" /></th><th>Slug</th><th>Short URL</th><th>Original URL</th><th>Clicks</th><th>Status</th><th>Expires</th><th>Created</th><th>By</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="paginationBottom" class="row" style="margin-top:.5rem; display:none;">
+          <button id="prevPage2" disabled>Prev</button>
+          <span id="pageInfo2" class="muted">Page 1</span>
+          <button id="nextPage2">Next</button>
+        </div>
+      </div>
+
+      <!-- Groups Section -->
+      <div class="card" id="groupsSection">
+        <div class="row" style="margin-bottom:.75rem;">
+          <h3 style="margin-right:auto">Groups</h3>
+          <button id="createGroupBtn">New Group</button>
+          <button id="refreshGroups">Refresh</button>
+        </div>
+        <p class="muted" style="margin-bottom:.5rem;">Groups let you organize links and share access with team members.</p>
+        <table id="groupsTbl">
+          <thead><tr><th>Name</th><th>Description</th><th>Your Role</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:white; margin:5% auto; padding:2rem; border-radius:.5rem; max-width:550px; max-height:85vh; overflow-y:auto;">
+        <h3>Edit Link: <span id="editSlug"></span></h3>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editUrl" style="width:120px;">Target URL:</label>
+          <input id="editUrl" type="url" style="flex:1;" />
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editDesc" style="width:120px;">Description:</label>
+          <input id="editDesc" type="text" style="flex:1;" placeholder="Optional description" />
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label style="width:120px;">Status:</label>
+          <label><input id="editActive" type="checkbox" /> Active</label>
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editExpires" style="width:120px;">Expires:</label>
+          <input id="editExpires" type="datetime-local" style="flex:1;" />
+          <span class="muted" style="margin-left:.5rem;">(empty=never)</span>
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editActivateAt" style="width:120px;">Activate at:</label>
+          <input id="editActivateAt" type="datetime-local" style="flex:1;" />
+          <span class="muted" style="margin-left:.5rem;">(scheduled)</span>
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editRedirectDelay" style="width:120px;">Countdown:</label>
+          <input id="editRedirectDelay" type="number" min="0" max="60" style="width:80px;" placeholder="0" />
+          <span class="muted" style="margin-left:.5rem;">seconds (0=instant redirect)</span>
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="editGroup" style="width:120px;">Group:</label>
+          <select id="editGroup" style="flex:1;">
+            <option value="">No group</option>
+          </select>
+        </div>
+        <div class="row" style="justify-content:space-between; margin-top:1.5rem;">
+          <button id="editDelete" style="background:#dc3545; color:white;">Delete</button>
+          <div>
+            <button id="editCancel" style="margin-right:.5rem;">Cancel</button>
+            <button id="editSave" style="background:#4CAF50; color:white;">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qrModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:white; margin:10% auto; padding:2rem; border-radius:.5rem; max-width:380px; text-align:center;">
+        <h3>QR Code: <span id="qrSlug"></span></h3>
+        <div class="row" style="justify-content:center; margin:1rem 0;">
+          <label class="muted" style="margin-right:.5rem;">Mode:</label>
+          <select id="qrMode" style="padding:.4rem;">
+            <option value="">Direct redirect</option>
+            <option value="+">Preview page (+)</option>
+          </select>
+        </div>
+        <div id="qrContainer" style="margin:1rem 0; min-height:200px; display:flex; align-items:center; justify-content:center;"></div>
+        <div id="qrUrlDisplay" class="muted" style="font-size:.8rem; word-break:break-all; margin-bottom:1rem;"></div>
+        <div class="row" style="justify-content:center; gap:1rem;">
+          <a id="qrDownload" href="#" download style="display:none; padding:.6rem 1rem; background:#4CAF50; color:white; text-decoration:none; border-radius:4px;">Download SVG</a>
+          <button id="qrClose">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create/Edit Group Modal -->
+    <div id="groupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:white; margin:10% auto; padding:2rem; border-radius:.5rem; max-width:450px;">
+        <h3 id="groupModalTitle">Create Group</h3>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="groupName" style="width:100px;">Name:</label>
+          <input id="groupName" type="text" style="flex:1;" placeholder="My Team Links" />
+        </div>
+        <div class="row" style="margin-bottom:1rem;">
+          <label for="groupDesc" style="width:100px;">Description:</label>
+          <input id="groupDesc" type="text" style="flex:1;" placeholder="Optional description" />
+        </div>
+        <div class="row" style="justify-content:flex-end; margin-top:1.5rem;">
+          <button id="groupCancel" style="margin-right:.5rem;">Cancel</button>
+          <button id="groupSave" style="background:#4CAF50; color:white;">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group Members Modal -->
+    <div id="membersModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:white; margin:5% auto; padding:2rem; border-radius:.5rem; max-width:550px; max-height:85vh; overflow-y:auto;">
+        <h3>Members: <span id="membersGroupName"></span></h3>
+        <div class="row" style="margin-bottom:1rem;">
+          <input id="addMemberEmail" type="email" placeholder="user@example.com" style="flex:1;" />
+          <select id="addMemberRole" style="width:100px;">
+            <option value="viewer">Viewer</option>
+            <option value="editor" selected>Editor</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button id="addMemberBtn">Add</button>
+        </div>
+        <table id="membersTbl" style="width:100%;">
+          <thead><tr><th>Email</th><th>Role</th><th>Added</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="row" style="justify-content:flex-end; margin-top:1.5rem;">
+          <button id="membersClose">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js?v=2"></script>
+  </body>
+  </html>

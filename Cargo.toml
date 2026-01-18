@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "domain",
+    "apps/api-server",
+    "adapters/aws-dynamo",
+    "adapters/google-auth",
+    "adapters/sqlite-adapter",
+    "apps/lambda-redirect",
+    "apps/lambda-admin",
+    "shared/http-common"
+]
+default-members = ["domain", "apps/api-server"]
+
+# 1. Centralize Package Metadata
+# Member crates can now use `edition.workspace = true`, etc.
+[workspace.package]
+version = "0.1.0"
+edition = "2021" # 2021 for current stable, 2024 if you are on nightly
+authors = ["Runar Bell <runar@jpro.no>"]
+license = "MIT"
+repository = "https://github.com/jProfessionals/url-shortener"
+
+# 2. Centralize Dependencies
+# This ensures all your crates use the exact same version of dependencies.
+[workspace.dependencies]
+tokio = { version = "1.48.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+
+# 3. Centralize Lints (Optional but recommended)
+# Enforce code style across the whole workspace.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"

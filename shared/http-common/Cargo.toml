@@ -1,0 +1,21 @@
+[package]
+name = "http-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json = "1.0"
+chrono = "0.4"
+
+# Lambda support (optional)
+[dependencies.lambda_http]
+version = "1.0.1"
+optional = true
+
+[dependencies.http]
+version = "1.2"
+optional = true
+
+[features]
+default = []
+lambda = ["lambda_http", "http"]

@@ -1,0 +1,463 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  URL Shortener — Lambda + HTTP API + DynamoDB
+  Notes for new users:
+  - Deploy with: sam deploy --guided
+  - Separate environments by setting StageName (dev/prod/etc.)
+
+Parameters:
+  # StageName is used to namespace resource names and your API stage (/dev, /prod, ...)
+  StageName:
+    Type: String
+    Default: dev
+
+  # Used by the admin API to restrict access to a Google Workspace domain.
+  AllowedDomain:
+    Type: String
+    Description: Allowed Google Workspace domain for admin access (e.g., acme.com)
+
+  # Used by the admin API to validate Google ID tokens (audience check).
+  GoogleOAuthClientId:
+    Type: String
+    Description: OAuth client ID used to validate Google ID tokens
+
+  # Domain to use when constructing short URLs in admin responses
+  ShortlinkDomain:
+    Type: String
+    Description: Fully-qualified domain for short URLs (e.g., https://short.company.com)
+
+  # CORS origin allowed for admin API
+  CorsAllowOrigin:
+    Type: String
+    Description: Allowed CORS Origin for admin UI (e.g., https://admin.company.com)
+
+  # Comma-separated list of admin emails (can see/edit all links)
+  AdminEmails:
+    Type: String
+    Default: ''
+    Description: Comma-separated list of admin emails (e.g., admin@company.com,ops@company.com)
+
+  # Custom domain settings (optional - leave empty to skip custom domain setup)
+  CustomDomainName:
+    Type: String
+    Default: ''
+    Description: Custom domain for the API (e.g., dev-sc.jpro.dev). Leave empty to skip.
+
+  CustomDomainCertificateArn:
+    Type: String
+    Default: ''
+    Description: ACM certificate ARN for custom domain. Required if CustomDomainName is set.
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref CustomDomainName, '']]
+
+Globals:
+  Function:
+    # Custom runtime on Amazon Linux 2023 (recommended over provided.al2 going forward).
+    # If you switch architectures (arm64), ensure you build the bootstrap for that architecture.
+    Runtime: provided.al2023
+    Architectures: [x86_64]
+    Timeout: 5
+    MemorySize: 128
+
+Resources:
+  # DynamoDB table holding "slug" -> destination URL (and optional metadata).
+  ShortlinksTable:
+    Type: AWS::DynamoDB::Table
+    # prevents accidental deletion during stack tear-down / replacement
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # Compute names here (intrinsic functions are NOT allowed in Parameter defaults).
+      TableName: !Sub 'shortlinks-${StageName}'
+      BillingMode: PAY_PER_REQUEST
+
+      # One row per shortlink. Partition key is the slug (e.g., "abc123").
+      AttributeDefinitions:
+        - AttributeName: slug
+          AttributeType: S
+      KeySchema:
+        - AttributeName: slug
+          KeyType: HASH
+
+      # Optional but strongly recommended for recoverability / rollback safety.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # DynamoDB table holding counters / sequences / stats.
+  CountersTable:
+    Type: AWS::DynamoDB::Table
+    # prevents accidental deletion during stack tear-down / replacement
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'counters-${StageName}'
+      BillingMode: PAY_PER_REQUEST
+
+      # Stores counters like "nextSlugId" (or any other monotonic counters you use).
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+
+      # Optional but strongly recommended for recoverability / rollback safety.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # DynamoDB table for groups (team collaboration)
+  GroupsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'groups-${StageName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # DynamoDB table for group members
+  GroupMembersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'group-members-${StageName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: group_id
+          AttributeType: S
+        - AttributeName: user_email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: group_id
+          KeyType: HASH
+        - AttributeName: user_email
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # API Gateway v2 HTTP API (lower latency + cost than REST API).
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # API "title" in the console.
+      Name: !Sub 'url-shortener-${StageName}'
+      # If omitted, API Gateway uses $default. Making it explicit helps new users.
+      StageName: !Ref StageName
+
+      # CORS is handled by Lambda functions directly, not API Gateway.
+      # This allows different CORS policies per route:
+      # - Admin API: restricted to CORS_ALLOW_ORIGIN env var
+      # - Public QR endpoints: allows * for cross-origin embedding
+      # Note: Removing CorsConfiguration means Lambda must handle OPTIONS preflight too.
+
+      # If you want to add API Gateway-level auth later, SAM supports HttpApi.Properties.Auth.
+      # See AWS::Serverless::HttpApi docs for Auth + JWT/Lambda authorizers.
+
+  # Public redirect endpoint: GET /{slug}
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'url-shortener-redirect-${StageName}'
+
+      # For Rust custom runtime this folder should contain an executable named "bootstrap".
+      CodeUri: ./artifacts/lambda-redirect/
+      Handler: bootstrap
+
+      Events:
+        # This matches any single path segment, e.g. /abc123
+        # Note: /api/links is more specific and will still match the admin routes.
+        GetSlug:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: '/{slug}'
+
+      # IAM permissions using AWS SAM policy templates.
+      # - Read shortlinks (for resolving slugs and checking is_active)
+      # - Update shortlinks (for incrementing click_count)
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShortlinksTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt ShortlinksTable.Arn
+
+      Environment:
+        Variables:
+          # Use table names, not ARNs, for SDK calls.
+          DYNAMO_TABLE_SHORTLINKS: !Ref ShortlinksTable
+          DYNAMO_TABLE_COUNTERS: !Ref CountersTable
+
+  # Admin API: list and create links
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'url-shortener-admin-${StageName}'
+      CodeUri: ./artifacts/lambda-admin/
+      Handler: bootstrap
+
+      Events:
+        # Admin endpoints (you should enforce auth in Lambda, or add API Gateway authorizers).
+        GetLinks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /api/links
+        PostLinks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/links
+        PatchLink:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: PATCH
+            Path: /api/links/{slug}
+        OptionsLink:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/links/{slug}
+        GetMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /api/me
+        OptionsMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/me
+        OptionsLinks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/links
+        DeleteLink:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /api/links/{slug}
+        # Bulk operations
+        BulkDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/links/bulk/delete
+        OptionsBulkDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/links/bulk/delete
+        BulkActivate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/links/bulk/activate
+        OptionsBulkActivate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/links/bulk/activate
+        BulkDeactivate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/links/bulk/deactivate
+        OptionsBulkDeactivate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/links/bulk/deactivate
+        # Group endpoints
+        GetGroups:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /api/groups
+        PostGroups:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/groups
+        OptionsGroups:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/groups
+        GetGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /api/groups/{id}
+        PatchGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: PATCH
+            Path: /api/groups/{id}
+        DeleteGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /api/groups/{id}
+        OptionsGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/groups/{id}
+        # Group members endpoints
+        GetGroupMembers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /api/groups/{id}/members
+        PostGroupMembers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/groups/{id}/members
+        OptionsGroupMembers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/groups/{id}/members
+        DeleteGroupMember:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /api/groups/{id}/members/{email}
+        OptionsGroupMember:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: OPTIONS
+            Path: /api/groups/{id}/members/{email}
+
+      # Least-privilege inline IAM policy for required actions.
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Scan
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ShortlinksTable.Arn
+                - !GetAtt GroupsTable.Arn
+                - !GetAtt GroupMembersTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt CountersTable.Arn
+
+      Environment:
+        Variables:
+          DYNAMO_TABLE_SHORTLINKS: !Ref ShortlinksTable
+          DYNAMO_TABLE_COUNTERS: !Ref CountersTable
+          DYNAMO_TABLE_GROUPS: !Ref GroupsTable
+          DYNAMO_TABLE_GROUP_MEMBERS: !Ref GroupMembersTable
+
+          # Token validation inputs
+          GOOGLE_OAUTH_CLIENT_ID: !Ref GoogleOAuthClientId
+          ALLOWED_DOMAIN: !Ref AllowedDomain
+
+          # Admin response URL construction and CORS
+          SHORTLINK_DOMAIN: !Ref ShortlinkDomain
+          CORS_ALLOW_ORIGIN: !Ref CorsAllowOrigin
+
+          # Admin authorization (comma-separated emails)
+          ADMIN_EMAILS: !Ref AdminEmails
+
+          # SECURITY NOTE:
+          # Do not set "skip signature verification" flags in production.
+          # If your code supports a dev-only bypass, prefer gating it via StageName == dev.
+          GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE: ''
+
+  # Custom domain for the API (optional - only created if CustomDomainName is provided)
+  ApiCustomDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref CustomDomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CustomDomainCertificateArn
+          EndpointType: REGIONAL
+
+  ApiCustomDomainMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasCustomDomain
+    DependsOn: ApiCustomDomain
+    Properties:
+      DomainName: !Ref CustomDomainName
+      ApiId: !Ref HttpApi
+      Stage: !Ref StageName
+
+Outputs:
+  # Official docs show this Fn::Sub pattern for HTTP API URLs. :contentReference[oaicite:7]{index=7}
+  ApiEndpoint:
+    Description: HTTP API base URL (includes stage)
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/'
+
+  ShortlinksTableOut:
+    Description: Shortlinks table name
+    Value: !Ref ShortlinksTable
+
+  CountersTableOut:
+    Description: Counters table name
+    Value: !Ref CountersTable
+
+  GroupsTableOut:
+    Description: Groups table name
+    Value: !Ref GroupsTable
+
+  GroupMembersTableOut:
+    Description: Group members table name
+    Value: !Ref GroupMembersTable
+
+  CustomDomainTarget:
+    Condition: HasCustomDomain
+    Description: CNAME target for custom domain (add this to your DNS)
+    Value: !GetAtt ApiCustomDomain.RegionalDomainName

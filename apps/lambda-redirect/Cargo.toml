@@ -1,0 +1,18 @@
+[package]
+name = "lambda-redirect"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../../domain" }
+aws-dynamo = { path = "../../adapters/aws-dynamo" }
+http-common = { path = "../../shared/http-common", features = ["lambda"] }
+lambda_http = "1.0.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0"
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tokio.workspace = true
+qrcode = "0.14"
+
+[dev-dependencies]

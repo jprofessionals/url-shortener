@@ -1,0 +1,13 @@
+[package]
+name = "domain"
+description = "The domain component of the URL Shortener service"
+
+# Inherit these from the root workspace
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Inherit dependencies. You don't specify version numbers here anymore.
+serde.workspace = true
