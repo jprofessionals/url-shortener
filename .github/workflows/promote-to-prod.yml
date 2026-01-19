@@ -1,67 +1,40 @@
-name: Deploy AWS Lambdas
+name: Promote to Production
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'domain/**'
-      - 'adapters/**'
-      - 'apps/**'
-      - 'shared/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'infra/sam/**'
-      - '.github/workflows/deploy-lambdas.yml'
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Workflow run ID to promote (leave empty for latest successful)'
+        required: false
+        type: string
 
 env:
   AWS_REGION: eu-north-1
 
 jobs:
-  build:
+  promote:
     runs-on: ubuntu-latest
+    environment: prod
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Get latest successful run ID
+        if: inputs.run_id == ''
+        id: get-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list --workflow=deploy-lambdas.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Using artifacts from run: $RUN_ID"
 
-      - name: Install cargo-lambda
-        run: pip install cargo-lambda
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Build Lambda artifacts
-        run: make build-lambdas
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lambda-artifacts
-          path: infra/sam/artifacts/
-          retention-days: 7
-
-  deploy-dev:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: dev
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
+      - name: Download artifacts from previous run
         uses: actions/download-artifact@v4
         with:
           name: lambda-artifacts
           path: infra/sam/artifacts/
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id || steps.get-run.outputs.run_id }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -73,18 +46,18 @@ jobs:
       - name: Setup SAM CLI
         uses: aws-actions/setup-sam@v2
 
-      - name: Deploy to dev
+      - name: Deploy to prod
         working-directory: infra/sam
         run: |
           sam deploy \
-            --stack-name url-shortener-dev \
+            --stack-name url-shortener-prod \
             --template-file template.yaml \
             --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              StageName=dev \
+              StageName=prod \
               AllowedDomain=${{ vars.ALLOWED_DOMAIN }} \
               GoogleOAuthClientId=${{ vars.GOOGLE_OAUTH_CLIENT_ID }} \
               ShortlinkDomain=${{ vars.SHORTLINK_DOMAIN }} \
