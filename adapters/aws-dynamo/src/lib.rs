@@ -106,7 +106,10 @@ impl DynamoRepo {
     /// Construct with table names but create a default AWS SDK client using env/IMDS.
     pub fn new(tables: DynamoTables) -> Result<Self, CoreError> {
         let rt = Self::maybe_create_runtime()?;
-        let conf = Self::block_on_with_rt(&rt, aws_config::load_from_env());
+        let conf = Self::block_on_with_rt(
+            &rt,
+            aws_config::load_defaults(aws_config::BehaviorVersion::latest()),
+        );
         let client = Client::new(&conf);
         Ok(Self {
             table_shortlinks: tables.shortlinks,
@@ -835,7 +838,7 @@ fn item_to_member(item: &HashMap<String, AttributeValue>) -> Result<GroupMember,
     let added_by = UserEmail::new(added_by.to_string())
         .map_err(|_| CoreError::Repository("bad added_by".into()))?;
     let role =
-        GroupRole::from_str(role_str).ok_or_else(|| CoreError::Repository("bad role".into()))?;
+        GroupRole::parse(role_str).ok_or_else(|| CoreError::Repository("bad role".into()))?;
 
     Ok(GroupMember {
         group_id,
@@ -1294,8 +1297,8 @@ fn item_to_audit(item: &HashMap<String, AttributeValue>) -> Result<AuditEntry, C
 
     let actor_email = UserEmail::new(actor_email.to_string())
         .map_err(|_| CoreError::Repository("bad actor_email".into()))?;
-    let action = AuditAction::from_str(action_str)
-        .ok_or_else(|| CoreError::Repository("bad action".into()))?;
+    let action =
+        AuditAction::parse(action_str).ok_or_else(|| CoreError::Repository("bad action".into()))?;
 
     Ok(AuditEntry {
         id,

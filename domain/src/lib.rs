@@ -115,12 +115,12 @@ impl ShortLink {
 
     /// Check if the link has expired based on the given current time.
     pub fn is_expired(&self, now: SystemTime) -> bool {
-        self.expires_at.map_or(false, |exp| now >= exp)
+        self.expires_at.is_some_and(|exp| now >= exp)
     }
 
     /// Check if the link is scheduled for future activation.
     pub fn is_scheduled(&self, now: SystemTime) -> bool {
-        self.activate_at.map_or(false, |act| now < act)
+        self.activate_at.is_some_and(|act| now < act)
     }
 
     /// Check if the link has been soft-deleted.
@@ -174,7 +174,7 @@ impl GroupRole {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "viewer" => Some(GroupRole::Viewer),
             "editor" => Some(GroupRole::Editor),
@@ -241,7 +241,7 @@ impl AuditAction {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "create" => Some(AuditAction::Create),
             "update" => Some(AuditAction::Update),

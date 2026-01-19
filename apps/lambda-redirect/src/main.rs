@@ -99,14 +99,14 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
 
     // Determine request mode based on suffix
     // Supports: /slug, /slug+, /slug.qr, /slug+.qr
-    let (actual_slug_str, mode, qr_suffix) = if slug_str.ends_with("+.qr") {
+    let (actual_slug_str, mode, qr_suffix) = if let Some(stripped) = slug_str.strip_suffix("+.qr") {
         // QR code for preview URL
-        (&slug_str[..slug_str.len() - 4], RequestMode::QrCode, "+")
-    } else if slug_str.ends_with(".qr") {
+        (stripped, RequestMode::QrCode, "+")
+    } else if let Some(stripped) = slug_str.strip_suffix(".qr") {
         // QR code for direct URL
-        (&slug_str[..slug_str.len() - 3], RequestMode::QrCode, "")
-    } else if slug_str.ends_with('+') {
-        (&slug_str[..slug_str.len() - 1], RequestMode::Preview, "")
+        (stripped, RequestMode::QrCode, "")
+    } else if let Some(stripped) = slug_str.strip_suffix('+') {
+        (stripped, RequestMode::Preview, "")
     } else {
         (slug_str, RequestMode::Redirect, "")
     };

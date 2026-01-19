@@ -1746,7 +1746,7 @@ async fn add_group_member(
         }
     };
 
-    let role = match GroupRole::from_str(&payload.role) {
+    let role = match GroupRole::parse(&payload.role) {
         Some(r) => r,
         None => {
             return Ok(with_cors(resp_with_error(

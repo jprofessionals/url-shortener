@@ -158,7 +158,7 @@ impl LinkRepository for InMemoryRepo {
                         || link
                             .description
                             .as_ref()
-                            .map_or(false, |d| d.to_lowercase().contains(&q)))
+                            .is_some_and(|d| d.to_lowercase().contains(&q)))
             })
             .take(limit)
             .cloned()
@@ -197,7 +197,7 @@ impl LinkRepository for InMemoryRepo {
                         && !link
                             .description
                             .as_ref()
-                            .map_or(false, |d| d.to_lowercase().contains(&ql))
+                            .is_some_and(|d| d.to_lowercase().contains(&ql))
                     {
                         return false;
                     }
@@ -464,7 +464,7 @@ impl GroupRepository for InMemoryGroupRepo {
                 if let Some(group) = groups.get(&member.group_id) {
                     // Don't duplicate if already added as creator
                     if group.created_by.as_str() != user_email.as_str() {
-                        result.push((group.clone(), member.role.clone()));
+                        result.push((group.clone(), member.role));
                     }
                 }
             }

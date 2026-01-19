@@ -61,6 +61,7 @@ struct AnyRepo {
     counter: Arc<Mutex<u64>>, // used when Memory; ignored when Sqlite which has its own counter
 }
 
+#[allow(dead_code)]
 impl AnyRepo {
     fn memory() -> Self {
         Self {
@@ -1358,6 +1359,15 @@ async fn get_me(State(state): State<AppState>, headers: HeaderMap) -> impl IntoR
     (StatusCode::OK, Json(user_info)).into_response()
 }
 
+/// Build short URL using shortlink_domain from config, or Host header as fallback.
+fn build_short_url(headers: &HeaderMap, slug: &str, shortlink_domain: &Option<String>) -> String {
+    let host = shortlink_domain
+        .as_deref()
+        .or_else(|| headers.get("host").and_then(|v| v.to_str().ok()))
+        .unwrap_or("");
+    http_common::build_short_url_from_host(host, slug)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1444,15 +1454,6 @@ mod tests {
             "https://e2.com"
         );
     }
-}
-
-/// Build short URL using shortlink_domain from config, or Host header as fallback.
-fn build_short_url(headers: &HeaderMap, slug: &str, shortlink_domain: &Option<String>) -> String {
-    let host = shortlink_domain
-        .as_deref()
-        .or_else(|| headers.get("host").and_then(|v| v.to_str().ok()))
-        .unwrap_or("");
-    http_common::build_short_url_from_host(host, slug)
 }
 
 // Note: json_err, json_error_with_message, is_valid_alias, and system_time_to_rfc3339
