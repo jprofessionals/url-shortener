@@ -264,27 +264,61 @@ impl LinkRepository for DynamoRepo {
         let is_active = link.is_active;
         let updated_at = link.updated_at.map(system_time_to_secs);
         let expires_at = link.expires_at.map(system_time_to_secs);
+        let activate_at = link.activate_at.map(system_time_to_secs);
+        let description = link.description.clone();
+        let redirect_delay = link.redirect_delay;
+        let group_id = link.group_id.clone();
 
         let fut = async {
-            let mut req = self.client.update_item()
+            let mut req = self
+                .client
+                .update_item()
                 .table_name(table)
                 .key("slug", AttributeValue::S(slug))
-                .update_expression("SET original_url = :url, is_active = :active, updated_at = :ts, expires_at = :exp")
+                .update_expression(
+                    "SET original_url = :url, is_active = :active, updated_at = :ts, \
+                     expires_at = :exp, activate_at = :act, description = :desc, \
+                     redirect_delay = :delay, group_id = :gid",
+                )
                 .expression_attribute_values(":url", AttributeValue::S(original_url))
                 .expression_attribute_values(":active", AttributeValue::Bool(is_active))
                 .condition_expression("attribute_exists(slug)");
 
-            if let Some(ts) = updated_at {
-                req = req.expression_attribute_values(":ts", AttributeValue::N(ts.to_string()));
-            } else {
-                req = req.expression_attribute_values(":ts", AttributeValue::Null(true));
-            }
+            // Handle optional timestamp fields
+            req = match updated_at {
+                Some(ts) => {
+                    req.expression_attribute_values(":ts", AttributeValue::N(ts.to_string()))
+                }
+                None => req.expression_attribute_values(":ts", AttributeValue::Null(true)),
+            };
+            req = match expires_at {
+                Some(exp) => {
+                    req.expression_attribute_values(":exp", AttributeValue::N(exp.to_string()))
+                }
+                None => req.expression_attribute_values(":exp", AttributeValue::Null(true)),
+            };
+            req = match activate_at {
+                Some(act) => {
+                    req.expression_attribute_values(":act", AttributeValue::N(act.to_string()))
+                }
+                None => req.expression_attribute_values(":act", AttributeValue::Null(true)),
+            };
 
-            if let Some(exp) = expires_at {
-                req = req.expression_attribute_values(":exp", AttributeValue::N(exp.to_string()));
-            } else {
-                req = req.expression_attribute_values(":exp", AttributeValue::Null(true));
-            }
+            // Handle optional string fields
+            req = match description {
+                Some(d) => req.expression_attribute_values(":desc", AttributeValue::S(d)),
+                None => req.expression_attribute_values(":desc", AttributeValue::Null(true)),
+            };
+            req = match redirect_delay {
+                Some(d) => {
+                    req.expression_attribute_values(":delay", AttributeValue::N(d.to_string()))
+                }
+                None => req.expression_attribute_values(":delay", AttributeValue::Null(true)),
+            };
+            req = match group_id {
+                Some(gid) => req.expression_attribute_values(":gid", AttributeValue::S(gid)),
+                None => req.expression_attribute_values(":gid", AttributeValue::Null(true)),
+            };
 
             req.send().await
         };
