@@ -48,7 +48,8 @@ pub fn is_valid_alias(s: &str) -> bool {
     if s.len() < 3 || s.len() > 32 {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 // ============================================================================
@@ -209,8 +210,7 @@ pub mod lambda {
     pub fn with_cors(mut resp: Response<Body>) -> Response<Body> {
         use http::header::{HeaderName, HeaderValue};
         let headers = resp.headers_mut();
-        let allow_origin =
-            std::env::var("CORS_ALLOW_ORIGIN").unwrap_or_else(|_| "*".to_string());
+        let allow_origin = std::env::var("CORS_ALLOW_ORIGIN").unwrap_or_else(|_| "*".to_string());
         headers.insert(
             HeaderName::from_static("access-control-allow-origin"),
             HeaderValue::from_str(&allow_origin).unwrap_or(HeaderValue::from_static("*")),
@@ -242,11 +242,17 @@ mod tests {
     #[test]
     fn test_json_err() {
         let err = json_err("not_found");
-        assert_eq!(err, serde_json::json!({"error": {"code": "not_found", "message": "Resource not found"}}));
+        assert_eq!(
+            err,
+            serde_json::json!({"error": {"code": "not_found", "message": "Resource not found"}})
+        );
 
         // Unknown code falls back to code as message
         let err = json_err("custom_error");
-        assert_eq!(err, serde_json::json!({"error": {"code": "custom_error", "message": "custom_error"}}));
+        assert_eq!(
+            err,
+            serde_json::json!({"error": {"code": "custom_error", "message": "custom_error"}})
+        );
     }
 
     #[test]
@@ -283,9 +289,18 @@ mod tests {
 
     #[test]
     fn test_parse_query_param() {
-        assert_eq!(parse_query_param(Some("foo=bar"), "foo"), Some("bar".to_string()));
-        assert_eq!(parse_query_param(Some("created_by=user%40example.com"), "created_by"), Some("user@example.com".to_string()));
-        assert_eq!(parse_query_param(Some("limit=10&created_by=test%40test.com"), "created_by"), Some("test@test.com".to_string()));
+        assert_eq!(
+            parse_query_param(Some("foo=bar"), "foo"),
+            Some("bar".to_string())
+        );
+        assert_eq!(
+            parse_query_param(Some("created_by=user%40example.com"), "created_by"),
+            Some("user@example.com".to_string())
+        );
+        assert_eq!(
+            parse_query_param(Some("limit=10&created_by=test%40test.com"), "created_by"),
+            Some("test@test.com".to_string())
+        );
         assert_eq!(parse_query_param(Some("foo=bar"), "missing"), None);
         assert_eq!(parse_query_param(None, "foo"), None);
     }
@@ -294,7 +309,10 @@ mod tests {
     fn test_build_short_url_from_host() {
         // Without SHORTLINK_DOMAIN set
         std::env::remove_var("SHORTLINK_DOMAIN");
-        assert_eq!(build_short_url_from_host("example.com", "abc"), "https://example.com/abc");
+        assert_eq!(
+            build_short_url_from_host("example.com", "abc"),
+            "https://example.com/abc"
+        );
         assert_eq!(build_short_url_from_host("", "abc"), "/abc");
     }
 }

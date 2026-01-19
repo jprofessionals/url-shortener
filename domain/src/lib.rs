@@ -1,5 +1,5 @@
 //! Domain library for the URL Shortener.
-//! 
+//!
 //! This crate is dependency-free (inherits workspace metadata only) and holds
 //! the domain types, ports (traits), and error definitions. Keep adapters and
 //! IO concerns out of this crate.
@@ -19,13 +19,18 @@ impl Slug {
         if val.is_empty() {
             return Err(CoreError::InvalidSlug("empty".into()));
         }
-        if !val.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !val
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(CoreError::InvalidSlug("invalid characters".into()));
         }
         Ok(Self(val))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Email address of the user creating links.
@@ -42,7 +47,9 @@ impl UserEmail {
         Ok(Self(val))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Input data for creating a new short link.
@@ -83,7 +90,12 @@ pub struct ShortLink {
 
 impl ShortLink {
     /// Create a new ShortLink with default values for click_count (0) and is_active (true).
-    pub fn new(slug: Slug, original_url: String, created_at: SystemTime, created_by: UserEmail) -> Self {
+    pub fn new(
+        slug: Slug,
+        original_url: String,
+        created_at: SystemTime,
+        created_by: UserEmail,
+    ) -> Self {
         Self {
             slug,
             original_url,
@@ -283,7 +295,8 @@ pub trait LinkRepository: Send + Sync {
     /// Atomically increment the click count for a link.
     fn increment_click(&self, slug: &Slug) -> Result<(), CoreError>;
     /// List links created by a specific user.
-    fn list_by_creator(&self, email: &UserEmail, limit: usize) -> Result<Vec<ShortLink>, CoreError>;
+    fn list_by_creator(&self, email: &UserEmail, limit: usize)
+        -> Result<Vec<ShortLink>, CoreError>;
     /// Delete a link (soft delete by default).
     fn delete(&self, slug: &Slug, deleted_at: SystemTime) -> Result<(), CoreError>;
     /// Search links by slug or URL.
@@ -295,7 +308,12 @@ pub trait LinkRepository: Send + Sync {
     /// Bulk delete links (soft delete).
     fn bulk_delete(&self, slugs: &[Slug], deleted_at: SystemTime) -> Result<usize, CoreError>;
     /// Bulk update is_active status.
-    fn bulk_update_active(&self, slugs: &[Slug], is_active: bool, updated_at: SystemTime) -> Result<usize, CoreError>;
+    fn bulk_update_active(
+        &self,
+        slugs: &[Slug],
+        is_active: bool,
+        updated_at: SystemTime,
+    ) -> Result<usize, CoreError>;
 }
 
 /// Repository port for link groups.
@@ -308,8 +326,15 @@ pub trait GroupRepository: Send + Sync {
     fn add_member(&self, member: GroupMember) -> Result<(), CoreError>;
     fn remove_member(&self, group_id: &str, user_email: &UserEmail) -> Result<(), CoreError>;
     fn list_members(&self, group_id: &str) -> Result<Vec<GroupMember>, CoreError>;
-    fn get_member(&self, group_id: &str, user_email: &UserEmail) -> Result<Option<GroupMember>, CoreError>;
-    fn get_user_groups(&self, user_email: &UserEmail) -> Result<Vec<(LinkGroup, GroupRole)>, CoreError>;
+    fn get_member(
+        &self,
+        group_id: &str,
+        user_email: &UserEmail,
+    ) -> Result<Option<GroupMember>, CoreError>;
+    fn get_user_groups(
+        &self,
+        user_email: &UserEmail,
+    ) -> Result<Vec<(LinkGroup, GroupRole)>, CoreError>;
 }
 
 /// Repository port for click analytics.
@@ -323,8 +348,17 @@ pub trait ClickRepository: Send + Sync {
 /// Repository port for audit log.
 pub trait AuditRepository: Send + Sync {
     fn log(&self, entry: AuditEntry) -> Result<(), CoreError>;
-    fn list_for_target(&self, target_type: &str, target_id: &str, limit: usize) -> Result<Vec<AuditEntry>, CoreError>;
-    fn list_by_actor(&self, actor_email: &UserEmail, limit: usize) -> Result<Vec<AuditEntry>, CoreError>;
+    fn list_for_target(
+        &self,
+        target_type: &str,
+        target_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuditEntry>, CoreError>;
+    fn list_by_actor(
+        &self,
+        actor_email: &UserEmail,
+        limit: usize,
+    ) -> Result<Vec<AuditEntry>, CoreError>;
     fn list_recent(&self, limit: usize) -> Result<Vec<AuditEntry>, CoreError>;
 }
 
@@ -363,11 +397,11 @@ pub fn about() -> String {
 }
 
 // Re-export modules when added
+pub mod adapters;
 pub mod base62;
+pub mod service;
 pub mod slug;
 pub mod validate;
-pub mod adapters;
-pub mod service;
 
 #[cfg(test)]
 mod tests {
@@ -382,7 +416,10 @@ mod tests {
     #[test]
     fn slug_rejects_empty() {
         let err = Slug::new("").unwrap_err();
-        match err { CoreError::InvalidSlug(_) => {}, _ => panic!("expected InvalidSlug") }
+        match err {
+            CoreError::InvalidSlug(_) => {}
+            _ => panic!("expected InvalidSlug"),
+        }
     }
 
     #[test]

@@ -1,4 +1,3 @@
-
 //! google-auth — Google ID token verification adapter (claims + JWKS signature).
 //!
 //! Purpose
@@ -16,13 +15,13 @@
 //!   memory for a short TTL to handle key rotation.
 //! - Keeps a small public surface so apps don’t need to know the internals.
 
-use serde::Deserialize;
 use base64::Engine;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{trace};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use tracing::trace;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedUser {
@@ -68,7 +67,11 @@ struct Claims {
 /// Verify a Google ID token.
 /// - Default: verifies RS256 signature against Google's JWKS, validates iss/aud/exp.
 /// - Dev: if env `GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE` is truthy, only validates claims.
-pub async fn verify_async(id_token: &str, expected_aud: &str, allowed_domain: &str) -> Result<VerifiedUser, AuthError> {
+pub async fn verify_async(
+    id_token: &str,
+    expected_aud: &str,
+    allowed_domain: &str,
+) -> Result<VerifiedUser, AuthError> {
     if is_truthy_env("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE") {
         trace!("google-auth: insecure mode – skipping signature verification");
         return verify_claims_only(id_token, expected_aud, allowed_domain);
@@ -80,7 +83,9 @@ pub async fn verify_async(id_token: &str, expected_aud: &str, allowed_domain: &s
         return Err(AuthError::Malformed);
     }
     let kid = header.kid.ok_or(AuthError::Malformed)?;
-    let key = jwks_get_key_async(&kid).await.map_err(|_| AuthError::Network)?;
+    let key = jwks_get_key_async(&kid)
+        .await
+        .map_err(|_| AuthError::Network)?;
 
     // Validation: audience, issuer, exp
     let mut validation = Validation::new(Algorithm::RS256);
@@ -88,7 +93,8 @@ pub async fn verify_async(id_token: &str, expected_aud: &str, allowed_domain: &s
     validation.set_issuer(&["accounts.google.com", "https://accounts.google.com"]);
 
     let token_data = decode::<Claims>(id_token, &key, &validation).map_err(|e| match e.kind() {
-        jsonwebtoken::errors::ErrorKind::InvalidToken | jsonwebtoken::errors::ErrorKind::InvalidSignature => AuthError::SignatureInvalid,
+        jsonwebtoken::errors::ErrorKind::InvalidToken
+        | jsonwebtoken::errors::ErrorKind::InvalidSignature => AuthError::SignatureInvalid,
         jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::Expired,
         jsonwebtoken::errors::ErrorKind::InvalidAudience => AuthError::BadAudience,
         _ => AuthError::Malformed,
@@ -98,14 +104,21 @@ pub async fn verify_async(id_token: &str, expected_aud: &str, allowed_domain: &s
     apply_domain_checks(claims, allowed_domain)
 }
 
-fn verify_claims_only(id_token: &str, expected_aud: &str, allowed_domain: &str) -> Result<VerifiedUser, AuthError> {
+fn verify_claims_only(
+    id_token: &str,
+    expected_aud: &str,
+    allowed_domain: &str,
+) -> Result<VerifiedUser, AuthError> {
     let parts: Vec<&str> = id_token.split('.').collect();
-    if parts.len() != 3 { return Err(AuthError::Malformed); }
+    if parts.len() != 3 {
+        return Err(AuthError::Malformed);
+    }
     let payload_b64 = parts[1];
     let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload_b64.as_bytes())
         .map_err(|_| AuthError::Malformed)?;
-    let claims: Claims = serde_json::from_slice(&payload_bytes).map_err(|_| AuthError::InvalidPayload("json"))?;
+    let claims: Claims =
+        serde_json::from_slice(&payload_bytes).map_err(|_| AuthError::InvalidPayload("json"))?;
 
     // Audience check (string or array)
     match &claims.aud {
@@ -116,8 +129,13 @@ fn verify_claims_only(id_token: &str, expected_aud: &str, allowed_domain: &str) 
 
     // Expiry check
     if let Some(exp) = claims.exp {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if exp <= now { return Err(AuthError::Expired); }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if exp <= now {
+            return Err(AuthError::Expired);
+        }
     }
 
     apply_domain_checks(claims, allowed_domain)
@@ -126,7 +144,9 @@ fn verify_claims_only(id_token: &str, expected_aud: &str, allowed_domain: &str) 
 fn apply_domain_checks(claims: Claims, allowed_domain: &str) -> Result<VerifiedUser, AuthError> {
     // Email checks
     let email = claims.email.ok_or(AuthError::InvalidPayload("email"))?;
-    if claims.email_verified != Some(true) { return Err(AuthError::EmailNotVerified); }
+    if claims.email_verified != Some(true) {
+        return Err(AuthError::EmailNotVerified);
+    }
 
     // Domain enforcement: prefer `hd`, fallback to email domain
     let domain_ok = match claims.hd {
@@ -136,9 +156,14 @@ fn apply_domain_checks(claims: Claims, allowed_domain: &str) -> Result<VerifiedU
             .map(|(_, d)| d.eq_ignore_ascii_case(allowed_domain))
             .unwrap_or(false),
     };
-    if !domain_ok { return Err(AuthError::DomainNotAllowed); }
+    if !domain_ok {
+        return Err(AuthError::DomainNotAllowed);
+    }
 
-    Ok(VerifiedUser { email, sub: claims.sub })
+    Ok(VerifiedUser {
+        email,
+        sub: claims.sub,
+    })
 }
 
 // ---- JWKS cache & fetch ----
@@ -147,7 +172,9 @@ const JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const JWKS_TTL: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Deserialize)]
-struct Jwks { keys: Vec<Jwk> }
+struct Jwks {
+    keys: Vec<Jwk>,
+}
 
 #[derive(Debug, Deserialize)]
 struct Jwk {
@@ -165,7 +192,10 @@ struct JwksCache {
 }
 
 static CACHE: LazyLock<Mutex<JwksCache>> = LazyLock::new(|| {
-    Mutex::new(JwksCache { fetched_at: UNIX_EPOCH, keys: HashMap::new() })
+    Mutex::new(JwksCache {
+        fetched_at: UNIX_EPOCH,
+        keys: HashMap::new(),
+    })
 });
 
 async fn jwks_get_key_async(kid: &str) -> Result<DecodingKey, ()> {
@@ -183,7 +213,9 @@ async fn jwks_get_key_async(kid: &str) -> Result<DecodingKey, ()> {
         let now = SystemTime::now();
         let fresh = cache.fetched_at + JWKS_TTL > now;
         if fresh {
-            if let Some(k) = cache.keys.get(kid) { return Ok(k.clone()); }
+            if let Some(k) = cache.keys.get(kid) {
+                return Ok(k.clone());
+            }
         }
     }
 
@@ -230,12 +262,14 @@ async fn fetch_jwks_map_async() -> Result<HashMap<String, DecodingKey>, reqwest:
 
 fn is_truthy_env(name: &str) -> bool {
     match std::env::var(name) {
-        Ok(v) => matches_ignore_case(&v, &["1","true","yes","on"]),
+        Ok(v) => matches_ignore_case(&v, &["1", "true", "yes", "on"]),
         Err(_) => false,
     }
 }
 
-fn matches_ignore_case(s: &str, any: &[&str]) -> bool { any.iter().any(|t| s.eq_ignore_ascii_case(t)) }
+fn matches_ignore_case(s: &str, any: &[&str]) -> bool {
+    any.iter().any(|t| s.eq_ignore_ascii_case(t))
+}
 
 #[cfg(test)]
 fn reset_jwks_cache() {
@@ -256,7 +290,11 @@ mod tests {
 
     #[test]
     fn verifies_domain_via_hd() {
-        let exp = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) + 300;
+        let exp = (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs())
+            + 300;
         let claims = serde_json::json!({
             "sub":"123",
             "aud":"client-1",
@@ -272,7 +310,11 @@ mod tests {
 
     #[test]
     fn audience_can_be_array() {
-        let exp = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) + 300;
+        let exp = (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs())
+            + 300;
         let claims = serde_json::json!({
             "sub":"x",
             "aud":["x","y","client-2"],
@@ -286,7 +328,11 @@ mod tests {
 
     #[test]
     fn rejects_wrong_domain() {
-        let exp = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) + 300;
+        let exp = (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs())
+            + 300;
         let claims = serde_json::json!({
             "sub":"x",
             "aud":"client-3",
@@ -306,8 +352,8 @@ mod tests {
         std::env::remove_var("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE");
 
         // Generate RSA keypair
-        use rsa::RsaPrivateKey;
         use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::RsaPrivateKey;
         let mut rng = rand::thread_rng();
         let bits = 2048;
         let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("keys");
@@ -319,7 +365,8 @@ mod tests {
         let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pub_key.e().to_bytes_be());
         let jwks_json = serde_json::json!({
             "keys": [ { "kid": "test1", "kty": "RSA", "alg": "RS256", "n": n, "e": e } ]
-        }).to_string();
+        })
+        .to_string();
         std::env::set_var("GOOGLE_AUTH_JWKS_OVERRIDE", jwks_json);
         reset_jwks_cache();
 
@@ -334,7 +381,10 @@ mod tests {
             email_verified: bool,
         }
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let claims = TClaims {
             sub: "u123".into(),
             aud: "client-ok".into(),
@@ -344,16 +394,29 @@ mod tests {
             email_verified: true,
         };
 
-        let header = jsonwebtoken::Header { kid: Some("test1".into()), alg: jsonwebtoken::Algorithm::RS256, ..Default::default() };
+        let header = jsonwebtoken::Header {
+            kid: Some("test1".into()),
+            alg: jsonwebtoken::Algorithm::RS256,
+            ..Default::default()
+        };
         let pem = priv_key.to_pkcs1_pem(Default::default()).unwrap();
-        let token_ok = jsonwebtoken::encode(&header, &claims, &jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap()).unwrap();
+        let token_ok = jsonwebtoken::encode(
+            &header,
+            &claims,
+            &jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+        )
+        .unwrap();
 
         // Success
-        let out = verify_async(&token_ok, "client-ok", "acme.com").await.expect("verified");
+        let out = verify_async(&token_ok, "client-ok", "acme.com")
+            .await
+            .expect("verified");
         assert_eq!(out.email, "user@acme.com");
 
         // Bad audience
-        let err = verify_async(&token_ok, "wrong-aud", "acme.com").await.unwrap_err();
+        let err = verify_async(&token_ok, "wrong-aud", "acme.com")
+            .await
+            .unwrap_err();
         assert!(matches!(err, AuthError::BadAudience));
 
         // Note: additional negative cases (expired, unknown kid/signature) can be flaky across

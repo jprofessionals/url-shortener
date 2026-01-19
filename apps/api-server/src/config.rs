@@ -72,7 +72,11 @@ pub struct ConfigError {
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Configuration error for {}: {}", self.field, self.message)
+        write!(
+            f,
+            "Configuration error for {}: {}",
+            self.field, self.message
+        )
     }
 }
 
@@ -118,9 +122,8 @@ impl Config {
             .unwrap_or(3001);
 
         // Auth provider
-        let auth_provider = AuthProvider::from_str(
-            &env::var("AUTH_PROVIDER").unwrap_or_else(|_| "none".into()),
-        );
+        let auth_provider =
+            AuthProvider::from_str(&env::var("AUTH_PROVIDER").unwrap_or_else(|_| "none".into()));
 
         // Allowed domain
         let allowed_domain = env::var("ALLOWED_DOMAIN").ok();
@@ -146,10 +149,8 @@ impl Config {
 
         // Insecure skip signature
         let skip_sig = env::var("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE").unwrap_or_default();
-        let insecure_skip_signature = matches!(
-            skip_sig.to_lowercase().as_str(),
-            "1" | "true" | "yes"
-        );
+        let insecure_skip_signature =
+            matches!(skip_sig.to_lowercase().as_str(), "1" | "true" | "yes");
 
         // CORS allow origin
         let cors_origin_str = env::var("CORS_ALLOW_ORIGIN").unwrap_or_else(|_| "*".into());
@@ -232,7 +233,10 @@ mod tests {
         assert_eq!(StorageProvider::from_str("memory"), StorageProvider::Memory);
         assert_eq!(StorageProvider::from_str("sqlite"), StorageProvider::Sqlite);
         assert_eq!(StorageProvider::from_str("SQLITE"), StorageProvider::Sqlite);
-        assert_eq!(StorageProvider::from_str("anything"), StorageProvider::Memory);
+        assert_eq!(
+            StorageProvider::from_str("anything"),
+            StorageProvider::Memory
+        );
     }
 
     #[test]

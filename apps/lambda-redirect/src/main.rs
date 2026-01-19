@@ -15,17 +15,17 @@
 //! - This crate depends only on the `domain` and `aws-dynamo` adapter for data.
 //! - It initializes minimal `tracing` logging compatible with Lambda CloudWatch.
 
-use lambda_http::{run, service_fn, Body, Error, Request, Response};
-use domain::{Clock, Slug};
+use aws_dynamo::DynamoRepo;
 use domain::service::LinkService;
 use domain::slug::Base62SlugGenerator;
-use aws_dynamo::DynamoRepo;
+use domain::{Clock, Slug};
+use http_common::lambda::resp;
+use lambda_http::{run, service_fn, Body, Error, Request, Response};
+use qrcode::render::svg;
+use qrcode::QrCode;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-use http_common::lambda::resp;
-use qrcode::QrCode;
-use qrcode::render::svg;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Wrap a response with CORS headers (allow all origins for public endpoints)
 fn with_cors(mut response: Response<Body>) -> Response<Body> {
@@ -42,14 +42,24 @@ struct AppState {
 
 #[derive(Clone)]
 struct StdClock;
-impl Clock for StdClock { fn now(&self) -> std::time::SystemTime { std::time::SystemTime::now() } }
+impl Clock for StdClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     init_tracing();
     // Build repo from env; if it fails, crash early to surface misconfiguration.
     let repo = DynamoRepo::from_env().map_err(|e| format!("dynamo init error: {e}"))?;
-    let state = AppState { svc: Arc::new(LinkService::new(repo, Base62SlugGenerator::new(1), StdClock)) };
+    let state = AppState {
+        svc: Arc::new(LinkService::new(
+            repo,
+            Base62SlugGenerator::new(1),
+            StdClock,
+        )),
+    };
 
     let handler = service_fn(move |req: Request| {
         let st = state.clone();
@@ -70,9 +80,9 @@ fn init_tracing() {
 /// Request mode based on URL suffix
 enum RequestMode {
     Redirect,
-    Preview,      // slug+
-    QrCode,       // slug.qr
-    CountdownRedirect { delay: u32 },  // Auto-redirect with countdown
+    Preview,                          // slug+
+    QrCode,                           // slug.qr
+    CountdownRedirect { delay: u32 }, // Auto-redirect with countdown
 }
 
 async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>, Error> {
@@ -114,7 +124,8 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
     };
 
     // Build the short URL for QR code generation
-    let host = req.headers()
+    let host = req
+        .headers()
         .get("host")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("example.com");
@@ -144,8 +155,7 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
             else if !link.is_active {
                 warn!(slug = %slug.as_str(), "link inactive");
                 resp(404, None, Some(http_common::json_err("not_found")))
-            }
-            else {
+            } else {
                 // Determine actual mode - check if link has redirect_delay
                 let actual_mode = match mode {
                     RequestMode::Redirect => {
@@ -198,13 +208,18 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
     };
 
     // Wrap QR requests with CORS headers for cross-origin fetch from admin UI
-    Ok(if is_qr_request { with_cors(response) } else { response })
+    Ok(if is_qr_request {
+        with_cors(response)
+    } else {
+        response
+    })
 }
 
 fn render_qr_code(url: &str) -> Response<Body> {
     match QrCode::new(url.as_bytes()) {
         Ok(code) => {
-            let svg_string = code.render()
+            let svg_string = code
+                .render()
                 .min_dimensions(200, 200)
                 .dark_color(svg::Color("#000000"))
                 .light_color(svg::Color("#ffffff"))
@@ -217,13 +232,11 @@ fn render_qr_code(url: &str) -> Response<Body> {
                 .body(Body::from(svg_string))
                 .expect("response build")
         }
-        Err(_) => {
-            Response::builder()
-                .status(500)
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{"error":"qr_generation_failed"}"#))
-                .expect("response build")
-        }
+        Err(_) => Response::builder()
+            .status(500)
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"error":"qr_generation_failed"}"#))
+            .expect("response build"),
     }
 }
 
@@ -233,18 +246,25 @@ fn render_preview_page(link: &domain::ShortLink, _short_url: &str) -> Response<B
     let expires_at = link.expires_at.map(http_common::system_time_to_rfc3339);
 
     let updated_html = if let Some(updated) = updated_at {
-        format!(r#"<tr><td>Last Modified</td><td>{}</td></tr>"#, html_escape(&updated))
+        format!(
+            r#"<tr><td>Last Modified</td><td>{}</td></tr>"#,
+            html_escape(&updated)
+        )
     } else {
         String::new()
     };
 
     let expires_html = if let Some(expires) = expires_at {
-        format!(r#"<tr><td>Expires</td><td>{}</td></tr>"#, html_escape(&expires))
+        format!(
+            r#"<tr><td>Expires</td><td>{}</td></tr>"#,
+            html_escape(&expires)
+        )
     } else {
         String::new()
     };
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -411,17 +431,25 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-fn render_countdown_page(link: &domain::ShortLink, _short_url: &str, delay_seconds: u32) -> Response<Body> {
+fn render_countdown_page(
+    link: &domain::ShortLink,
+    _short_url: &str,
+    delay_seconds: u32,
+) -> Response<Body> {
     let created_at = http_common::system_time_to_rfc3339(link.created_at);
     let description = link.description.as_deref().unwrap_or("");
 
     let description_html = if !description.is_empty() {
-        format!(r#"<div class="description">{}</div>"#, html_escape(description))
+        format!(
+            r#"<div class="description">{}</div>"#,
+            html_escape(description)
+        )
     } else {
         String::new()
     };
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">

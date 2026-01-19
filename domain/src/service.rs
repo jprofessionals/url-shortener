@@ -18,7 +18,12 @@ pub struct LinkService<R: LinkRepository, G: SlugGenerator, C: Clock> {
 
 impl<R: LinkRepository, G: SlugGenerator, C: Clock> LinkService<R, G, C> {
     pub fn new(repo: R, slugger: G, clock: C) -> Self {
-        Self { repo, slugger, clock, next_id: AtomicU64::new(0) }
+        Self {
+            repo,
+            slugger,
+            clock,
+            next_id: AtomicU64::new(0),
+        }
     }
 
     fn reserve_id(&self) -> u64 {
@@ -38,23 +43,21 @@ impl<R: LinkRepository, G: SlugGenerator, C: Clock> LinkService<R, G, C> {
         }
 
         // Generate slug from an internal increasing id; retry on unlikely collision
-        for _ in 0..100 { // hard cap to avoid infinite loop in degenerate cases
+        for _ in 0..100 {
+            // hard cap to avoid infinite loop in degenerate cases
             let id = self.reserve_id();
             let slug = self.slugger.next_slug(id);
             if self.repo.get(&slug)?.is_none() {
                 return self.persist_with_slug(slug, input);
             }
         }
-        Err(CoreError::Repository("failed to generate unique slug".into()))
+        Err(CoreError::Repository(
+            "failed to generate unique slug".into(),
+        ))
     }
 
     fn persist_with_slug(&self, slug: Slug, input: NewLink) -> Result<ShortLink, CoreError> {
-        let link = ShortLink::new(
-            slug,
-            input.original_url,
-            self.clock.now(),
-            input.user_email,
-        );
+        let link = ShortLink::new(slug, input.original_url, self.clock.now(), input.user_email);
         self.repo.put(link.clone())?;
         Ok(link)
     }
@@ -68,7 +71,9 @@ impl<R: LinkRepository, G: SlugGenerator, C: Clock> LinkService<R, G, C> {
     }
 
     /// List short links up to the given limit.
-    pub fn list(&self, limit: usize) -> Result<Vec<ShortLink>, CoreError> { self.repo.list(limit) }
+    pub fn list(&self, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
+        self.repo.list(limit)
+    }
 
     /// Update an existing link (original_url, is_active).
     pub fn update(&self, link: &ShortLink) -> Result<(), CoreError> {
@@ -81,7 +86,11 @@ impl<R: LinkRepository, G: SlugGenerator, C: Clock> LinkService<R, G, C> {
     }
 
     /// List links created by a specific user.
-    pub fn list_by_creator(&self, email: &crate::UserEmail, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
+    pub fn list_by_creator(
+        &self,
+        email: &crate::UserEmail,
+        limit: usize,
+    ) -> Result<Vec<ShortLink>, CoreError> {
         self.repo.list_by_creator(email, limit)
     }
 
@@ -100,7 +109,11 @@ mod tests {
     use std::time::SystemTime;
 
     struct TestClock;
-    impl Clock for TestClock { fn now(&self) -> SystemTime { SystemTime::UNIX_EPOCH } }
+    impl Clock for TestClock {
+        fn now(&self) -> SystemTime {
+            SystemTime::UNIX_EPOCH
+        }
+    }
 
     #[test]
     fn create_auto_generates_and_resolves() {

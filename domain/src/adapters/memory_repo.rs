@@ -32,24 +32,36 @@ pub struct InMemoryAuditRepo {
 
 impl InMemoryRepo {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(BTreeMap::new()) }
+        Self {
+            inner: Mutex::new(BTreeMap::new()),
+        }
     }
 
-    fn key(slug: &Slug) -> String { slug.as_str().to_string() }
+    fn key(slug: &Slug) -> String {
+        slug.as_str().to_string()
+    }
 }
 
 impl Default for InMemoryRepo {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LinkRepository for InMemoryRepo {
     fn get(&self, slug: &Slug) -> Result<Option<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         Ok(map.get(&Self::key(slug)).cloned())
     }
 
     fn put(&self, link: ShortLink) -> Result<(), CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let key = Self::key(&link.slug);
         if map.contains_key(&key) {
             return Err(CoreError::AlreadyExists);
@@ -59,8 +71,12 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn list(&self, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        Ok(map.values()
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        Ok(map
+            .values()
             .filter(|l| l.deleted_at.is_none())
             .take(limit)
             .cloned()
@@ -68,7 +84,10 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn update(&self, link: &ShortLink) -> Result<(), CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let key = Self::key(&link.slug);
         if !map.contains_key(&key) {
             return Err(CoreError::NotFound);
@@ -78,7 +97,10 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn increment_click(&self, slug: &Slug) -> Result<(), CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let key = Self::key(slug);
         match map.get_mut(&key) {
             Some(link) => {
@@ -89,8 +111,15 @@ impl LinkRepository for InMemoryRepo {
         }
     }
 
-    fn list_by_creator(&self, email: &UserEmail, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+    fn list_by_creator(
+        &self,
+        email: &UserEmail,
+        limit: usize,
+    ) -> Result<Vec<ShortLink>, CoreError> {
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         Ok(map
             .values()
             .filter(|link| link.created_by.as_str() == email.as_str() && link.deleted_at.is_none())
@@ -100,7 +129,10 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn delete(&self, slug: &Slug, deleted_at: SystemTime) -> Result<(), CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let key = Self::key(slug);
         match map.get_mut(&key) {
             Some(link) => {
@@ -112,15 +144,21 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn search(&self, query: &str, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let q = query.to_lowercase();
         Ok(map
             .values()
             .filter(|link| {
-                link.deleted_at.is_none() &&
-                (link.slug.as_str().to_lowercase().contains(&q) ||
-                 link.original_url.to_lowercase().contains(&q) ||
-                 link.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&q)))
+                link.deleted_at.is_none()
+                    && (link.slug.as_str().to_lowercase().contains(&q)
+                        || link.original_url.to_lowercase().contains(&q)
+                        || link
+                            .description
+                            .as_ref()
+                            .map_or(false, |d| d.to_lowercase().contains(&q)))
             })
             .take(limit)
             .cloned()
@@ -128,8 +166,12 @@ impl LinkRepository for InMemoryRepo {
     }
 
     fn list_paginated(&self, options: &ListOptions) -> Result<ListResult<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let mut items: Vec<_> = map.values()
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut items: Vec<_> = map
+            .values()
             .filter(|link| {
                 // Filter deleted
                 if !options.include_deleted && link.deleted_at.is_some() {
@@ -150,9 +192,13 @@ impl LinkRepository for InMemoryRepo {
                 // Filter by search
                 if let Some(ref q) = options.search {
                     let ql = q.to_lowercase();
-                    if !link.slug.as_str().to_lowercase().contains(&ql) &&
-                       !link.original_url.to_lowercase().contains(&ql) &&
-                       !link.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&ql)) {
+                    if !link.slug.as_str().to_lowercase().contains(&ql)
+                        && !link.original_url.to_lowercase().contains(&ql)
+                        && !link
+                            .description
+                            .as_ref()
+                            .map_or(false, |d| d.to_lowercase().contains(&ql))
+                    {
                         return false;
                     }
                 }
@@ -166,26 +212,39 @@ impl LinkRepository for InMemoryRepo {
 
         let total = items.len();
         let has_more = options.offset + options.limit < total;
-        let items: Vec<_> = items.into_iter()
+        let items: Vec<_> = items
+            .into_iter()
             .skip(options.offset)
             .take(options.limit)
             .collect();
 
-        Ok(ListResult { items, total, has_more })
+        Ok(ListResult {
+            items,
+            total,
+            has_more,
+        })
     }
 
     fn list_by_group(&self, group_id: &str, limit: usize) -> Result<Vec<ShortLink>, CoreError> {
-        let map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         Ok(map
             .values()
-            .filter(|link| link.group_id.as_ref() == Some(&group_id.to_string()) && link.deleted_at.is_none())
+            .filter(|link| {
+                link.group_id.as_ref() == Some(&group_id.to_string()) && link.deleted_at.is_none()
+            })
             .take(limit)
             .cloned()
             .collect())
     }
 
     fn bulk_delete(&self, slugs: &[Slug], deleted_at: SystemTime) -> Result<usize, CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let mut count = 0;
         for slug in slugs {
             let key = Self::key(slug);
@@ -197,8 +256,16 @@ impl LinkRepository for InMemoryRepo {
         Ok(count)
     }
 
-    fn bulk_update_active(&self, slugs: &[Slug], is_active: bool, updated_at: SystemTime) -> Result<usize, CoreError> {
-        let mut map = self.inner.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+    fn bulk_update_active(
+        &self,
+        slugs: &[Slug],
+        is_active: bool,
+        updated_at: SystemTime,
+    ) -> Result<usize, CoreError> {
+        let mut map = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let mut count = 0;
         for slug in slugs {
             let key = Self::key(slug);
@@ -224,12 +291,17 @@ impl InMemoryGroupRepo {
 }
 
 impl Default for InMemoryGroupRepo {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GroupRepository for InMemoryGroupRepo {
     fn create_group(&self, group: LinkGroup) -> Result<(), CoreError> {
-        let mut groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         if groups.contains_key(&group.id) {
             return Err(CoreError::AlreadyExists);
         }
@@ -238,13 +310,22 @@ impl GroupRepository for InMemoryGroupRepo {
     }
 
     fn get_group(&self, id: &str) -> Result<Option<LinkGroup>, CoreError> {
-        let groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         Ok(groups.get(id).cloned())
     }
 
     fn list_groups(&self, user_email: &UserEmail) -> Result<Vec<LinkGroup>, CoreError> {
-        let groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
 
         // Find groups where user is a member or creator
         let user_group_ids: Vec<_> = members
@@ -255,13 +336,18 @@ impl GroupRepository for InMemoryGroupRepo {
 
         Ok(groups
             .values()
-            .filter(|g| g.created_by.as_str() == user_email.as_str() || user_group_ids.contains(&g.id))
+            .filter(|g| {
+                g.created_by.as_str() == user_email.as_str() || user_group_ids.contains(&g.id)
+            })
             .cloned()
             .collect())
     }
 
     fn update_group(&self, group: &LinkGroup) -> Result<(), CoreError> {
-        let mut groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         if !groups.contains_key(&group.id) {
             return Err(CoreError::NotFound);
         }
@@ -270,8 +356,14 @@ impl GroupRepository for InMemoryGroupRepo {
     }
 
     fn delete_group(&self, id: &str) -> Result<(), CoreError> {
-        let mut groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let mut members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         if groups.remove(id).is_none() {
             return Err(CoreError::NotFound);
         }
@@ -280,15 +372,23 @@ impl GroupRepository for InMemoryGroupRepo {
     }
 
     fn add_member(&self, member: GroupMember) -> Result<(), CoreError> {
-        let groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         if !groups.contains_key(&member.group_id) {
             return Err(CoreError::NotFound);
         }
         drop(groups);
 
-        let mut members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         // Check if already a member
-        if members.iter().any(|m| m.group_id == member.group_id && m.user_email.as_str() == member.user_email.as_str()) {
+        if members.iter().any(|m| {
+            m.group_id == member.group_id && m.user_email.as_str() == member.user_email.as_str()
+        }) {
             return Err(CoreError::AlreadyExists);
         }
         members.push(member);
@@ -296,9 +396,13 @@ impl GroupRepository for InMemoryGroupRepo {
     }
 
     fn remove_member(&self, group_id: &str, user_email: &UserEmail) -> Result<(), CoreError> {
-        let mut members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let initial_len = members.len();
-        members.retain(|m| !(m.group_id == group_id && m.user_email.as_str() == user_email.as_str()));
+        members
+            .retain(|m| !(m.group_id == group_id && m.user_email.as_str() == user_email.as_str()));
         if members.len() == initial_len {
             return Err(CoreError::NotFound);
         }
@@ -306,18 +410,44 @@ impl GroupRepository for InMemoryGroupRepo {
     }
 
     fn list_members(&self, group_id: &str) -> Result<Vec<GroupMember>, CoreError> {
-        let members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        Ok(members.iter().filter(|m| m.group_id == group_id).cloned().collect())
+        let members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        Ok(members
+            .iter()
+            .filter(|m| m.group_id == group_id)
+            .cloned()
+            .collect())
     }
 
-    fn get_member(&self, group_id: &str, user_email: &UserEmail) -> Result<Option<GroupMember>, CoreError> {
-        let members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        Ok(members.iter().find(|m| m.group_id == group_id && m.user_email.as_str() == user_email.as_str()).cloned())
+    fn get_member(
+        &self,
+        group_id: &str,
+        user_email: &UserEmail,
+    ) -> Result<Option<GroupMember>, CoreError> {
+        let members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        Ok(members
+            .iter()
+            .find(|m| m.group_id == group_id && m.user_email.as_str() == user_email.as_str())
+            .cloned())
     }
 
-    fn get_user_groups(&self, user_email: &UserEmail) -> Result<Vec<(LinkGroup, GroupRole)>, CoreError> {
-        let groups = self.groups.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let members = self.members.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+    fn get_user_groups(
+        &self,
+        user_email: &UserEmail,
+    ) -> Result<Vec<(LinkGroup, GroupRole)>, CoreError> {
+        let groups = self
+            .groups
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let members = self
+            .members
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
 
         let mut result = Vec::new();
 
@@ -348,24 +478,35 @@ impl GroupRepository for InMemoryGroupRepo {
 
 impl InMemoryClickRepo {
     pub fn new() -> Self {
-        Self { clicks: Mutex::new(Vec::new()) }
+        Self {
+            clicks: Mutex::new(Vec::new()),
+        }
     }
 }
 
 impl Default for InMemoryClickRepo {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClickRepository for InMemoryClickRepo {
     fn record_click(&self, event: ClickEvent) -> Result<(), CoreError> {
-        let mut clicks = self.clicks.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut clicks = self
+            .clicks
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         clicks.push(event);
         Ok(())
     }
 
     fn get_clicks(&self, slug: &Slug, limit: usize) -> Result<Vec<ClickEvent>, CoreError> {
-        let clicks = self.clicks.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let mut matching: Vec<_> = clicks.iter()
+        let clicks = self
+            .clicks
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut matching: Vec<_> = clicks
+            .iter()
             .filter(|c| c.slug.as_str() == slug.as_str())
             .cloned()
             .collect();
@@ -374,18 +515,26 @@ impl ClickRepository for InMemoryClickRepo {
     }
 
     fn get_click_count_since(&self, slug: &Slug, since: SystemTime) -> Result<u64, CoreError> {
-        let clicks = self.clicks.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        Ok(clicks.iter()
+        let clicks = self
+            .clicks
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        Ok(clicks
+            .iter()
             .filter(|c| c.slug.as_str() == slug.as_str() && c.clicked_at >= since)
             .count() as u64)
     }
 
     fn get_clicks_by_day(&self, slug: &Slug, days: usize) -> Result<Vec<(String, u64)>, CoreError> {
         use std::collections::HashMap;
-        let clicks = self.clicks.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let clicks = self
+            .clicks
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
 
         let now = SystemTime::now();
-        let cutoff = now.checked_sub(std::time::Duration::from_secs(days as u64 * 24 * 60 * 60))
+        let cutoff = now
+            .checked_sub(std::time::Duration::from_secs(days as u64 * 24 * 60 * 60))
             .unwrap_or(SystemTime::UNIX_EPOCH);
 
         let mut by_day: HashMap<String, u64> = HashMap::new();
@@ -395,7 +544,8 @@ impl ClickRepository for InMemoryClickRepo {
                 continue;
             }
             // Format as YYYY-MM-DD using duration since UNIX_EPOCH
-            let secs = click.clicked_at
+            let secs = click
+                .clicked_at
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
@@ -415,24 +565,40 @@ impl ClickRepository for InMemoryClickRepo {
 
 impl InMemoryAuditRepo {
     pub fn new() -> Self {
-        Self { entries: Mutex::new(Vec::new()) }
+        Self {
+            entries: Mutex::new(Vec::new()),
+        }
     }
 }
 
 impl Default for InMemoryAuditRepo {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuditRepository for InMemoryAuditRepo {
     fn log(&self, entry: AuditEntry) -> Result<(), CoreError> {
-        let mut entries = self.entries.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         entries.push(entry);
         Ok(())
     }
 
-    fn list_for_target(&self, target_type: &str, target_id: &str, limit: usize) -> Result<Vec<AuditEntry>, CoreError> {
-        let entries = self.entries.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let mut matching: Vec<_> = entries.iter()
+    fn list_for_target(
+        &self,
+        target_type: &str,
+        target_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuditEntry>, CoreError> {
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut matching: Vec<_> = entries
+            .iter()
             .filter(|e| e.target_type == target_type && e.target_id == target_id)
             .cloned()
             .collect();
@@ -440,9 +606,17 @@ impl AuditRepository for InMemoryAuditRepo {
         Ok(matching.into_iter().take(limit).collect())
     }
 
-    fn list_by_actor(&self, actor_email: &UserEmail, limit: usize) -> Result<Vec<AuditEntry>, CoreError> {
-        let entries = self.entries.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
-        let mut matching: Vec<_> = entries.iter()
+    fn list_by_actor(
+        &self,
+        actor_email: &UserEmail,
+        limit: usize,
+    ) -> Result<Vec<AuditEntry>, CoreError> {
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let mut matching: Vec<_> = entries
+            .iter()
             .filter(|e| e.actor_email.as_str() == actor_email.as_str())
             .cloned()
             .collect();
@@ -451,7 +625,10 @@ impl AuditRepository for InMemoryAuditRepo {
     }
 
     fn list_recent(&self, limit: usize) -> Result<Vec<AuditEntry>, CoreError> {
-        let entries = self.entries.lock().map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let mut all: Vec<_> = entries.iter().cloned().collect();
         all.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(all.into_iter().take(limit).collect())

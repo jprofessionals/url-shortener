@@ -26,17 +26,27 @@ mod config;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use axum::{extract::{Path, State, Query}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Redirect}, routing::{get, post}, Json, Router};
-use domain::adapters::memory_repo::InMemoryRepo;
-use domain::{Clock, CoreError, Slug, UserEmail, LinkRepository};
-use domain::SlugGenerator;
-use domain::slug::Base62SlugGenerator;
-use serde::{Deserialize, Serialize};
-use tower_http::{cors::{CorsLayer, AllowOrigin}, trace::TraceLayer, request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer}};
 use axum::http::HeaderValue;
+use axum::{
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
+    Json, Router,
+};
+use domain::adapters::memory_repo::InMemoryRepo;
+use domain::slug::Base62SlugGenerator;
+use domain::SlugGenerator;
+use domain::{Clock, CoreError, LinkRepository, Slug, UserEmail};
+use google_auth::{AuthError as GAuthError, VerifiedUser};
+use serde::{Deserialize, Serialize};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    trace::TraceLayer,
+};
 use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, EnvFilter, prelude::*};
-use google_auth::{VerifiedUser, AuthError as GAuthError};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 // Local repo abstraction supporting memory or sqlite (feature-gated).
 enum RepoKind {
@@ -52,10 +62,20 @@ struct AnyRepo {
 }
 
 impl AnyRepo {
-    fn memory() -> Self { Self { kind: Arc::new(RepoKind::Memory(InMemoryRepo::new())), counter: Arc::new(Mutex::new(0)) } }
+    fn memory() -> Self {
+        Self {
+            kind: Arc::new(RepoKind::Memory(InMemoryRepo::new())),
+            counter: Arc::new(Mutex::new(0)),
+        }
+    }
 
     #[cfg(feature = "sqlite")]
-    fn sqlite_from_env() -> Result<Self, CoreError> { Ok(Self { kind: Arc::new(RepoKind::Sqlite(sqlite_adapter::SqliteRepo::from_env()?)), counter: Arc::new(Mutex::new(0)) }) }
+    fn sqlite_from_env() -> Result<Self, CoreError> {
+        Ok(Self {
+            kind: Arc::new(RepoKind::Sqlite(sqlite_adapter::SqliteRepo::from_env()?)),
+            counter: Arc::new(Mutex::new(0)),
+        })
+    }
 
     fn get(&self, slug: &Slug) -> Result<Option<domain::ShortLink>, CoreError> {
         match &*self.kind {
@@ -97,7 +117,11 @@ impl AnyRepo {
         }
     }
 
-    fn list_by_creator(&self, email: &domain::UserEmail, limit: usize) -> Result<Vec<domain::ShortLink>, CoreError> {
+    fn list_by_creator(
+        &self,
+        email: &domain::UserEmail,
+        limit: usize,
+    ) -> Result<Vec<domain::ShortLink>, CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.list_by_creator(email, limit),
             #[cfg(feature = "sqlite")]
@@ -108,7 +132,10 @@ impl AnyRepo {
     fn increment_global_counter(&self) -> Result<u64, CoreError> {
         match &*self.kind {
             RepoKind::Memory(_) => {
-                let mut g = self.counter.lock().map_err(|_| CoreError::Repository("counter mutex".into()))?;
+                let mut g = self
+                    .counter
+                    .lock()
+                    .map_err(|_| CoreError::Repository("counter mutex".into()))?;
                 let id = *g;
                 *g = id.saturating_add(1);
                 Ok(id)
@@ -118,7 +145,11 @@ impl AnyRepo {
         }
     }
 
-    fn delete(&self, slug: &domain::Slug, deleted_at: std::time::SystemTime) -> Result<(), CoreError> {
+    fn delete(
+        &self,
+        slug: &domain::Slug,
+        deleted_at: std::time::SystemTime,
+    ) -> Result<(), CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.delete(slug, deleted_at),
             #[cfg(feature = "sqlite")]
@@ -134,7 +165,10 @@ impl AnyRepo {
         }
     }
 
-    fn list_paginated(&self, options: &domain::ListOptions) -> Result<domain::ListResult<domain::ShortLink>, CoreError> {
+    fn list_paginated(
+        &self,
+        options: &domain::ListOptions,
+    ) -> Result<domain::ListResult<domain::ShortLink>, CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.list_paginated(options),
             #[cfg(feature = "sqlite")]
@@ -142,7 +176,11 @@ impl AnyRepo {
         }
     }
 
-    fn list_by_group(&self, group_id: &str, limit: usize) -> Result<Vec<domain::ShortLink>, CoreError> {
+    fn list_by_group(
+        &self,
+        group_id: &str,
+        limit: usize,
+    ) -> Result<Vec<domain::ShortLink>, CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.list_by_group(group_id, limit),
             #[cfg(feature = "sqlite")]
@@ -150,7 +188,11 @@ impl AnyRepo {
         }
     }
 
-    fn bulk_delete(&self, slugs: &[domain::Slug], deleted_at: std::time::SystemTime) -> Result<usize, CoreError> {
+    fn bulk_delete(
+        &self,
+        slugs: &[domain::Slug],
+        deleted_at: std::time::SystemTime,
+    ) -> Result<usize, CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.bulk_delete(slugs, deleted_at),
             #[cfg(feature = "sqlite")]
@@ -158,7 +200,12 @@ impl AnyRepo {
         }
     }
 
-    fn bulk_update_active(&self, slugs: &[domain::Slug], is_active: bool, updated_at: std::time::SystemTime) -> Result<usize, CoreError> {
+    fn bulk_update_active(
+        &self,
+        slugs: &[domain::Slug],
+        is_active: bool,
+        updated_at: std::time::SystemTime,
+    ) -> Result<usize, CoreError> {
         match &*self.kind {
             RepoKind::Memory(r) => r.bulk_update_active(slugs, is_active, updated_at),
             #[cfg(feature = "sqlite")]
@@ -180,7 +227,11 @@ struct AppState {
 
 #[derive(Clone)]
 struct StdClock;
-impl Clock for StdClock { fn now(&self) -> std::time::SystemTime { std::time::SystemTime::now() } }
+impl Clock for StdClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -212,28 +263,44 @@ async fn main() {
 
     let mut app = Router::new()
         .route("/:slug", get(get_slug))
-        .route("/api/links", post(create_link).get(list_links).options(preflight_links))
-        .route("/api/links/:slug", axum::routing::patch(update_link).delete(delete_link).options(preflight_link))
-        .route("/api/links/bulk/delete", post(bulk_delete_links).options(preflight_links))
-        .route("/api/links/bulk/activate", post(bulk_activate_links).options(preflight_links))
-        .route("/api/links/bulk/deactivate", post(bulk_deactivate_links).options(preflight_links))
+        .route(
+            "/api/links",
+            post(create_link).get(list_links).options(preflight_links),
+        )
+        .route(
+            "/api/links/:slug",
+            axum::routing::patch(update_link)
+                .delete(delete_link)
+                .options(preflight_link),
+        )
+        .route(
+            "/api/links/bulk/delete",
+            post(bulk_delete_links).options(preflight_links),
+        )
+        .route(
+            "/api/links/bulk/activate",
+            post(bulk_activate_links).options(preflight_links),
+        )
+        .route(
+            "/api/links/bulk/deactivate",
+            post(bulk_deactivate_links).options(preflight_links),
+        )
         .route("/api/me", get(get_me).options(preflight_links))
         .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
         .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &axum::http::Request<_>| {
-                    let request_id = request
-                        .headers()
-                        .get("x-request-id")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("-");
-                    tracing::info_span!(
-                        "http_request",
-                        method = %request.method(),
-                        uri = %request.uri(),
-                        request_id = %request_id,
-                    )
-                })
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                let request_id = request
+                    .headers()
+                    .get("x-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("-");
+                tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                    request_id = %request_id,
+                )
+            }),
         )
         .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
         .with_state(state);
@@ -244,7 +311,13 @@ async fn main() {
     } else {
         CorsLayer::new()
             .allow_origin(AllowOrigin::list([cfg.cors_allow_origin]))
-            .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PATCH, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::PATCH,
+                axum::http::Method::DELETE,
+                axum::http::Method::OPTIONS,
+            ])
             .allow_headers([
                 axum::http::header::AUTHORIZATION,
                 axum::http::header::CONTENT_TYPE,
@@ -255,25 +328,36 @@ async fn main() {
 
     let addr: SocketAddr = ([0, 0, 0, 0], cfg.port).into();
     info!(%addr, "api-server listening");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind port");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind port");
     axum::serve(listener, app).await.expect("server error");
 }
 
-
 fn init_tracing(cfg: &config::Config) {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let registry = tracing_subscriber::registry().with(env_filter);
     match cfg.log_format {
         config::LogFormat::Json => {
             registry
-                .with(fmt::layer().json().with_target(true).with_timer(fmt::time::SystemTime).with_writer(std::io::stdout))
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_target(true)
+                        .with_timer(fmt::time::SystemTime)
+                        .with_writer(std::io::stdout),
+                )
                 .init();
         }
         config::LogFormat::Pretty => {
             registry
-                .with(fmt::layer().pretty().with_target(true).with_writer(std::io::stdout))
+                .with(
+                    fmt::layer()
+                        .pretty()
+                        .with_target(true)
+                        .with_writer(std::io::stdout),
+                )
                 .init();
         }
     }
@@ -375,7 +459,11 @@ struct UserInfo {
     is_admin: bool,
 }
 
-fn link_to_out(link: domain::ShortLink, headers: &HeaderMap, shortlink_domain: &Option<String>) -> LinkOut {
+fn link_to_out(
+    link: domain::ShortLink,
+    headers: &HeaderMap,
+    shortlink_domain: &Option<String>,
+) -> LinkOut {
     LinkOut {
         slug: link.slug.as_str().to_string(),
         short_url: build_short_url(headers, link.slug.as_str(), shortlink_domain),
@@ -395,7 +483,10 @@ fn link_to_out(link: domain::ShortLink, headers: &HeaderMap, shortlink_domain: &
 
 fn is_admin(email: &str) -> bool {
     let admins = std::env::var("ADMIN_EMAILS").unwrap_or_default();
-    admins.split(',').map(|s| s.trim()).any(|a| a.eq_ignore_ascii_case(email))
+    admins
+        .split(',')
+        .map(|s| s.trim())
+        .any(|a| a.eq_ignore_ascii_case(email))
 }
 
 async fn get_slug(State(state): State<AppState>, Path(slug): Path<String>) -> impl IntoResponse {
@@ -407,43 +498,134 @@ async fn get_slug(State(state): State<AppState>, Path(slug): Path<String>) -> im
             }
             Ok(None) => {
                 warn!(slug = %s.as_str(), "resolve 404");
-                (StatusCode::NOT_FOUND, Json(http_common::json_err("not_found"))).into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(http_common::json_err("not_found")),
+                )
+                    .into_response()
             }
             Err(e) => {
                 error!(slug = %s.as_str(), err = ?e, "resolve error");
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_err("error"))).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(http_common::json_err("error")),
+                )
+                    .into_response()
             }
         },
         Err(_) => {
             warn!("bad slug in path");
-            (StatusCode::BAD_REQUEST, Json(http_common::json_err("invalid_slug"))).into_response()
+            (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_err("invalid_slug")),
+            )
+                .into_response()
         }
     }
 }
 
-async fn create_link(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<CreateLinkReq>) -> impl IntoResponse {
+async fn create_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateLinkReq>,
+) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "invalid user email in token"))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "invalid user email in token",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Validate URL
     if let Err(e) = domain::validate::validate_original_url(&body.original_url) {
-        return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", &format!("{}", e)))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(http_common::json_error_with_message(
+                "invalid_request",
+                &format!("{}", e),
+            )),
+        )
+            .into_response();
     }
 
     // Determine slug
     let slug = if let Some(alias) = &body.alias {
-        if !http_common::is_valid_alias(alias) { return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "alias must be 3-32 characters, alphanumeric with hyphens/underscores"))).into_response(); }
-        match Slug::new(alias.clone()) { Ok(s) => s, Err(_) => return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "invalid alias"))).into_response() }
+        if !http_common::is_valid_alias(alias) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_error_with_message(
+                    "invalid_request",
+                    "alias must be 3-32 characters, alphanumeric with hyphens/underscores",
+                )),
+            )
+                .into_response();
+        }
+        match Slug::new(alias.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(http_common::json_error_with_message(
+                        "invalid_request",
+                        "invalid alias",
+                    )),
+                )
+                    .into_response()
+            }
+        }
     } else {
-        let id = match state.repo.increment_global_counter() { Ok(v) => v, Err(e) => { error!(err=?e, "counter error"); return (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "counter failure"))).into_response() } };
+        let id = match state.repo.increment_global_counter() {
+            Ok(v) => v,
+            Err(e) => {
+                error!(err=?e, "counter error");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(http_common::json_error_with_message(
+                        "internal",
+                        "counter failure",
+                    )),
+                )
+                    .into_response();
+            }
+        };
         state.slugger.next_slug(id)
     };
 
@@ -453,22 +635,55 @@ async fn create_link(State(state): State<AppState>, headers: HeaderMap, Json(bod
 
     // Apply optional fields
     link.description = body.description;
-    link.activate_at = body.activate_at.and_then(|s| http_common::parse_rfc3339(&s).ok());
+    link.activate_at = body
+        .activate_at
+        .and_then(|s| http_common::parse_rfc3339(&s).ok());
     link.redirect_delay = body.redirect_delay;
     link.group_id = body.group_id;
 
     match state.repo.put(link.clone()) {
         Ok(()) => {
             info!(slug = %link.slug.as_str(), "create ok");
-            (StatusCode::CREATED, Json(link_to_out(link, &headers, &state.shortlink_domain))).into_response()
+            (
+                StatusCode::CREATED,
+                Json(link_to_out(link, &headers, &state.shortlink_domain)),
+            )
+                .into_response()
         }
-        Err(CoreError::AlreadyExists) => (StatusCode::CONFLICT, Json(http_common::json_error_with_message("conflict", "alias already exists"))).into_response(),
-        Err(CoreError::InvalidUrl(_)) | Err(CoreError::InvalidSlug(_)) => (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "invalid input"))).into_response(),
-        Err(e) => { error!(err=?e, "create error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(CoreError::AlreadyExists) => (
+            StatusCode::CONFLICT,
+            Json(http_common::json_error_with_message(
+                "conflict",
+                "alias already exists",
+            )),
+        )
+            .into_response(),
+        Err(CoreError::InvalidUrl(_)) | Err(CoreError::InvalidSlug(_)) => (
+            StatusCode::BAD_REQUEST,
+            Json(http_common::json_error_with_message(
+                "invalid_request",
+                "invalid input",
+            )),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(err=?e, "create error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
-enum AuthHttp { Unauthorized, Forbidden }
+enum AuthHttp {
+    Unauthorized,
+    Forbidden,
+}
 
 async fn verify_request_user(
     headers: &HeaderMap,
@@ -477,26 +692,47 @@ async fn verify_request_user(
     google_oauth_client_id: &Option<String>,
 ) -> Result<VerifiedUser, AuthHttp> {
     if *auth_provider == config::AuthProvider::None {
-        let email = headers.get("X-Debug-User").and_then(|v| v.to_str().ok()).ok_or(AuthHttp::Unauthorized)?;
+        let email = headers
+            .get("X-Debug-User")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(AuthHttp::Unauthorized)?;
         // Optional domain enforcement even in none-mode
         if let Some(dom) = allowed_domain {
-            if !email.rsplit_once('@').map(|(_, d)| d.eq_ignore_ascii_case(dom)).unwrap_or(false) {
+            if !email
+                .rsplit_once('@')
+                .map(|(_, d)| d.eq_ignore_ascii_case(dom))
+                .unwrap_or(false)
+            {
                 return Err(AuthHttp::Forbidden);
             }
         }
-        return Ok(VerifiedUser { email: email.to_string(), sub: "debug".into() });
+        return Ok(VerifiedUser {
+            email: email.to_string(),
+            sub: "debug".into(),
+        });
     }
 
     // Google mode
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()).ok_or(AuthHttp::Unauthorized)?;
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AuthHttp::Unauthorized)?;
     let token = auth.strip_prefix("Bearer ").ok_or(AuthHttp::Unauthorized)?;
     // These are validated at startup when auth_provider=Google, so unwrap is safe here
-    let aud = google_oauth_client_id.as_ref().ok_or(AuthHttp::Unauthorized)?;
+    let aud = google_oauth_client_id
+        .as_ref()
+        .ok_or(AuthHttp::Unauthorized)?;
     let allowed = allowed_domain.as_ref().ok_or(AuthHttp::Unauthorized)?;
     match google_auth::verify_async(token, aud, allowed).await {
         Ok(u) => Ok(u),
-        Err(GAuthError::DomainNotAllowed) => { warn!("auth failed: domain not allowed"); Err(AuthHttp::Forbidden) }
-        Err(e) => { warn!(err=?e, "auth failed"); Err(AuthHttp::Unauthorized) }
+        Err(GAuthError::DomainNotAllowed) => {
+            warn!("auth failed: domain not allowed");
+            Err(AuthHttp::Forbidden)
+        }
+        Err(e) => {
+            warn!(err=?e, "auth failed");
+            Err(AuthHttp::Unauthorized)
+        }
     }
 }
 
@@ -510,23 +746,64 @@ struct ListQuery {
     include_deleted: Option<bool>,
 }
 
-async fn list_links(State(state): State<AppState>, headers: HeaderMap, Query(q): Query<ListQuery>) -> impl IntoResponse {
+async fn list_links(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<ListQuery>,
+) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     let limit = match q.limit {
         Some(n) if (1..=500).contains(&n) => n,
-        Some(_) => return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "limit must be between 1 and 500"))).into_response(),
+        Some(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_error_with_message(
+                    "invalid_request",
+                    "limit must be between 1 and 500",
+                )),
+            )
+                .into_response()
+        }
         None => 50, // default
     };
     let offset = q.offset.unwrap_or(0);
 
     // Build list options for paginated query
-    let created_by = q.created_by.as_ref().and_then(|e| UserEmail::new(e.clone()).ok());
+    let created_by = q
+        .created_by
+        .as_ref()
+        .and_then(|e| UserEmail::new(e.clone()).ok());
     let options = domain::ListOptions {
         limit,
         offset,
@@ -538,22 +815,47 @@ async fn list_links(State(state): State<AppState>, headers: HeaderMap, Query(q):
 
     match state.repo.list_paginated(&options) {
         Ok(result) => {
-            let links: Vec<LinkOut> = result.items.into_iter()
+            let links: Vec<LinkOut> = result
+                .items
+                .into_iter()
                 .map(|l| link_to_out(l, &headers, &state.shortlink_domain))
                 .collect();
             let user_info = UserInfo {
                 email: verified.email.clone(),
                 is_admin: is_admin(&verified.email),
             };
-            (StatusCode::OK, Json(ListOut { links, total: result.total, has_more: result.has_more, user: Some(user_info) })).into_response()
+            (
+                StatusCode::OK,
+                Json(ListOut {
+                    links,
+                    total: result.total,
+                    has_more: result.has_more,
+                    user: Some(user_info),
+                }),
+            )
+                .into_response()
         }
-        Err(e) => { error!(err=?e, "list error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(e) => {
+            error!(err=?e, "list error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
-async fn preflight_links() -> impl IntoResponse { StatusCode::NO_CONTENT }
+async fn preflight_links() -> impl IntoResponse {
+    StatusCode::NO_CONTENT
+}
 
-async fn preflight_link() -> impl IntoResponse { StatusCode::NO_CONTENT }
+async fn preflight_link() -> impl IntoResponse {
+    StatusCode::NO_CONTENT
+}
 
 async fn update_link(
     State(state): State<AppState>,
@@ -562,35 +864,99 @@ async fn update_link(
     Json(body): Json<UpdateLinkReq>,
 ) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Parse slug
     let slug = match Slug::new(slug_str.clone()) {
         Ok(s) => s,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "invalid slug"))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_error_with_message(
+                    "invalid_request",
+                    "invalid slug",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Get existing link
     let mut link = match state.repo.get(&slug) {
         Ok(Some(l)) => l,
-        Ok(None) => return (StatusCode::NOT_FOUND, Json(http_common::json_err("not_found"))).into_response(),
-        Err(e) => { error!(err=?e, "get error"); return (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response(); }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(http_common::json_err("not_found")),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!(err=?e, "get error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response();
+        }
     };
 
     // Check ownership or admin
     let user_is_admin = is_admin(&verified.email);
     if link.created_by.as_str() != verified.email && !user_is_admin {
-        return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "not link owner"))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(http_common::json_error_with_message(
+                "forbidden",
+                "not link owner",
+            )),
+        )
+            .into_response();
     }
 
     // Apply updates
     if let Some(url) = body.original_url {
         if let Err(e) = domain::validate::validate_original_url(&url) {
-            return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", &format!("{}", e)))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_error_with_message(
+                    "invalid_request",
+                    &format!("{}", e),
+                )),
+            )
+                .into_response();
         }
         link.original_url = url;
     }
@@ -618,10 +984,28 @@ async fn update_link(
     match state.repo.update(&link) {
         Ok(()) => {
             info!(slug = %slug_str, "update ok");
-            (StatusCode::OK, Json(link_to_out(link, &headers, &state.shortlink_domain))).into_response()
+            (
+                StatusCode::OK,
+                Json(link_to_out(link, &headers, &state.shortlink_domain)),
+            )
+                .into_response()
         }
-        Err(CoreError::NotFound) => (StatusCode::NOT_FOUND, Json(http_common::json_err("not_found"))).into_response(),
-        Err(e) => { error!(err=?e, "update error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(CoreError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(http_common::json_err("not_found")),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(err=?e, "update error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -631,29 +1015,86 @@ async fn delete_link(
     Path(slug_str): Path<String>,
 ) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Parse slug
     let slug = match Slug::new(slug_str.clone()) {
         Ok(s) => s,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "invalid slug"))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(http_common::json_error_with_message(
+                    "invalid_request",
+                    "invalid slug",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Get existing link to check ownership
     let link = match state.repo.get(&slug) {
         Ok(Some(l)) => l,
-        Ok(None) => return (StatusCode::NOT_FOUND, Json(http_common::json_err("not_found"))).into_response(),
-        Err(e) => { error!(err=?e, "get error"); return (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response(); }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(http_common::json_err("not_found")),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!(err=?e, "get error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response();
+        }
     };
 
     // Check ownership or admin
     let user_is_admin = is_admin(&verified.email);
     if link.created_by.as_str() != verified.email && !user_is_admin {
-        return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "not link owner"))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(http_common::json_error_with_message(
+                "forbidden",
+                "not link owner",
+            )),
+        )
+            .into_response();
     }
 
     // Soft delete
@@ -663,8 +1104,22 @@ async fn delete_link(
             info!(slug = %slug_str, "delete ok");
             (StatusCode::NO_CONTENT, ()).into_response()
         }
-        Err(CoreError::NotFound) => (StatusCode::NOT_FOUND, Json(http_common::json_err("not_found"))).into_response(),
-        Err(e) => { error!(err=?e, "delete error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(CoreError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(http_common::json_err("not_found")),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(err=?e, "delete error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -674,24 +1129,65 @@ async fn bulk_delete_links(
     Json(body): Json<BulkSlugsReq>,
 ) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Only admins can bulk delete
     if !is_admin(&verified.email) {
-        return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "admin required for bulk operations"))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(http_common::json_error_with_message(
+                "forbidden",
+                "admin required for bulk operations",
+            )),
+        )
+            .into_response();
     }
 
     // Parse slugs
-    let slugs: Vec<Slug> = body.slugs.iter()
+    let slugs: Vec<Slug> = body
+        .slugs
+        .iter()
         .filter_map(|s| Slug::new(s.clone()).ok())
         .collect();
 
     if slugs.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "no valid slugs provided"))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(http_common::json_error_with_message(
+                "invalid_request",
+                "no valid slugs provided",
+            )),
+        )
+            .into_response();
     }
 
     let deleted_at = state.clock.now();
@@ -700,7 +1196,17 @@ async fn bulk_delete_links(
             info!(count = affected, "bulk delete ok");
             (StatusCode::OK, Json(BulkResultOut { affected })).into_response()
         }
-        Err(e) => { error!(err=?e, "bulk delete error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(e) => {
+            error!(err=?e, "bulk delete error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -727,42 +1233,122 @@ async fn bulk_update_active_impl(
     is_active: bool,
 ) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     // Only admins can bulk update
     if !is_admin(&verified.email) {
-        return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "admin required for bulk operations"))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(http_common::json_error_with_message(
+                "forbidden",
+                "admin required for bulk operations",
+            )),
+        )
+            .into_response();
     }
 
     // Parse slugs
-    let slugs: Vec<Slug> = body.slugs.iter()
+    let slugs: Vec<Slug> = body
+        .slugs
+        .iter()
         .filter_map(|s| Slug::new(s.clone()).ok())
         .collect();
 
     if slugs.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(http_common::json_error_with_message("invalid_request", "no valid slugs provided"))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(http_common::json_error_with_message(
+                "invalid_request",
+                "no valid slugs provided",
+            )),
+        )
+            .into_response();
     }
 
     let updated_at = state.clock.now();
     match state.repo.bulk_update_active(&slugs, is_active, updated_at) {
         Ok(affected) => {
-            info!(count = affected, is_active = is_active, "bulk update active ok");
+            info!(
+                count = affected,
+                is_active = is_active,
+                "bulk update active ok"
+            );
             (StatusCode::OK, Json(BulkResultOut { affected })).into_response()
         }
-        Err(e) => { error!(err=?e, "bulk update error"); (StatusCode::INTERNAL_SERVER_ERROR, Json(http_common::json_error_with_message("internal", "server error"))).into_response() }
+        Err(e) => {
+            error!(err=?e, "bulk update error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(http_common::json_error_with_message(
+                    "internal",
+                    "server error",
+                )),
+            )
+                .into_response()
+        }
     }
 }
 
 async fn get_me(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     // Auth
-    let verified = match verify_request_user(&headers, &state.auth_provider, &state.allowed_domain, &state.google_oauth_client_id).await {
+    let verified = match verify_request_user(
+        &headers,
+        &state.auth_provider,
+        &state.allowed_domain,
+        &state.google_oauth_client_id,
+    )
+    .await
+    {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return (StatusCode::UNAUTHORIZED, Json(http_common::json_error_with_message("unauthorized", "missing or invalid token"))).into_response(),
-        Err(AuthHttp::Forbidden) => return (StatusCode::FORBIDDEN, Json(http_common::json_error_with_message("forbidden", "domain not allowed"))).into_response(),
+        Err(AuthHttp::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(http_common::json_error_with_message(
+                    "unauthorized",
+                    "missing or invalid token",
+                )),
+            )
+                .into_response()
+        }
+        Err(AuthHttp::Forbidden) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(http_common::json_error_with_message(
+                    "forbidden",
+                    "domain not allowed",
+                )),
+            )
+                .into_response()
+        }
     };
 
     let user_info = UserInfo {
@@ -775,8 +1361,8 @@ async fn get_me(State(state): State<AppState>, headers: HeaderMap) -> impl IntoR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{Request, header};
     use axum::body::Body;
+    use axum::http::{header, Request};
     use tower::util::ServiceExt;
 
     fn app() -> Router {
@@ -791,7 +1377,10 @@ mod tests {
         };
         Router::new()
             .route("/:slug", get(get_slug))
-            .route("/api/links", post(create_link).get(list_links).options(preflight_links))
+            .route(
+                "/api/links",
+                post(create_link).get(list_links).options(preflight_links),
+            )
             .with_state(state)
     }
 
@@ -812,7 +1401,17 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::CREATED);
 
         // List
-        let resp = router.clone().oneshot(Request::builder().uri("/api/links").header("X-Debug-User", "user@example.com").body(Body::empty()).unwrap()).await.unwrap();
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/links")
+                    .header("X-Debug-User", "user@example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         // Resolve should redirect (308)
@@ -823,19 +1422,34 @@ mod tests {
             .uri("/api/links")
             .header("content-type", "application/json")
             .header("X-Debug-User", "user@example.com")
-            .body(Body::from("{\"original_url\":\"https://e2.com\",\"alias\":\"custom1\"}"))
+            .body(Body::from(
+                "{\"original_url\":\"https://e2.com\",\"alias\":\"custom1\"}",
+            ))
             .unwrap();
         let resp = router.clone().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let resp = router.clone().oneshot(Request::builder().uri("/custom1").body(Body::empty()).unwrap()).await.unwrap();
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/custom1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
-        assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "https://e2.com");
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "https://e2.com"
+        );
     }
 }
 
 /// Build short URL using shortlink_domain from config, or Host header as fallback.
 fn build_short_url(headers: &HeaderMap, slug: &str, shortlink_domain: &Option<String>) -> String {
-    let host = shortlink_domain.as_deref()
+    let host = shortlink_domain
+        .as_deref()
         .or_else(|| headers.get("host").and_then(|v| v.to_str().ok()))
         .unwrap_or("");
     http_common::build_short_url_from_host(host, slug)

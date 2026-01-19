@@ -13,7 +13,9 @@ pub struct Base62SlugGenerator {
 }
 
 impl Base62SlugGenerator {
-    pub fn new(min_width: usize) -> Self { Self { min_width } }
+    pub fn new(min_width: usize) -> Self {
+        Self { min_width }
+    }
 }
 
 impl SlugGenerator for Base62SlugGenerator {
@@ -22,7 +24,9 @@ impl SlugGenerator for Base62SlugGenerator {
         if self.min_width > 0 && s.len() < self.min_width {
             let pad = self.min_width - s.len();
             let mut buf = String::with_capacity(self.min_width);
-            for _ in 0..pad { buf.push('0'); }
+            for _ in 0..pad {
+                buf.push('0');
+            }
             buf.push_str(&s);
             s = buf;
         }

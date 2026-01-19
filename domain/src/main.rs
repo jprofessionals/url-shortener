@@ -9,7 +9,9 @@ use domain::{Clock, CoreError, NewLink, Slug, UserEmail};
 
 struct StdClock;
 impl Clock for StdClock {
-    fn now(&self) -> SystemTime { SystemTime::now() }
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
 }
 
 fn print_usage() {
@@ -35,11 +37,16 @@ fn run() -> Result<(), String> {
 
     match cmd.as_str() {
         "create" => {
-            let Some(url) = args.next() else { return Err("missing <url> for create".into()) };
+            let Some(url) = args.next() else {
+                return Err("missing <url> for create".into());
+            };
 
             // Defaults for optional flags
             let mut custom_slug: Option<Slug> = None;
-            let mut user = match UserEmail::new("dev@local") { Ok(e) => e, Err(_) => return Err("invalid default user".into()) };
+            let mut user = match UserEmail::new("dev@local") {
+                Ok(e) => e,
+                Err(_) => return Err("invalid default user".into()),
+            };
 
             // Parse simple flags: --slug <val>, --user <email>
             let rest: Vec<String> = args.collect();
@@ -47,7 +54,9 @@ fn run() -> Result<(), String> {
             while i < rest.len() {
                 match rest[i].as_str() {
                     "--slug" => {
-                        if i + 1 >= rest.len() { return Err("--slug requires a value".into()); }
+                        if i + 1 >= rest.len() {
+                            return Err("--slug requires a value".into());
+                        }
                         let val = rest[i + 1].clone();
                         match Slug::new(val) {
                             Ok(s) => custom_slug = Some(s),
@@ -56,7 +65,9 @@ fn run() -> Result<(), String> {
                         i += 2;
                     }
                     "--user" => {
-                        if i + 1 >= rest.len() { return Err("--user requires an email".into()); }
+                        if i + 1 >= rest.len() {
+                            return Err("--user requires an email".into());
+                        }
                         let val = rest[i + 1].clone();
                         match UserEmail::new(val) {
                             Ok(e) => user = e,
@@ -70,7 +81,11 @@ fn run() -> Result<(), String> {
                 }
             }
 
-            let input = NewLink { original_url: url, custom_slug, user_email: user };
+            let input = NewLink {
+                original_url: url,
+                custom_slug,
+                user_email: user,
+            };
             match svc.create(input) {
                 Ok(link) => {
                     println!("created: {} -> {}", link.slug.as_str(), link.original_url);
@@ -80,7 +95,9 @@ fn run() -> Result<(), String> {
             }
         }
         "resolve" => {
-            let Some(slug_str) = args.next() else { return Err("missing <slug> for resolve".into()) };
+            let Some(slug_str) = args.next() else {
+                return Err("missing <slug> for resolve".into());
+            };
             let slug = match Slug::new(slug_str) {
                 Ok(s) => s,
                 Err(e) => return Err(format!("invalid slug: {}", e)),

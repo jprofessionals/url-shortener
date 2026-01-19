@@ -11,7 +11,9 @@ pub fn validate_original_url(s: &str) -> Result<(), CoreError> {
         return Err(CoreError::InvalidUrl("empty".into()));
     }
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return Err(CoreError::InvalidUrl("must start with http:// or https://".into()));
+        return Err(CoreError::InvalidUrl(
+            "must start with http:// or https://".into(),
+        ));
     }
     if trimmed.len() > 2048 {
         return Err(CoreError::InvalidUrl("too long".into()));

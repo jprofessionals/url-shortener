@@ -21,15 +21,17 @@
 
 use lambda_http::{run, service_fn, Body, Error, Request, Response};
 use tracing::{error, info, warn};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use domain::{Clock, CoreError, GroupMember, GroupRepository, GroupRole, LinkGroup, Slug, UserEmail};
-use domain::SlugGenerator;
-use domain::LinkRepository;
-use domain::slug::Base62SlugGenerator;
 use aws_dynamo::DynamoRepo;
-use google_auth::{VerifiedUser, AuthError as GAuthError};
-use http_common::lambda::{resp, resp_with_error, with_cors, get_host};
+use domain::slug::Base62SlugGenerator;
+use domain::LinkRepository;
+use domain::SlugGenerator;
+use domain::{
+    Clock, CoreError, GroupMember, GroupRepository, GroupRole, LinkGroup, Slug, UserEmail,
+};
+use google_auth::{AuthError as GAuthError, VerifiedUser};
+use http_common::lambda::{get_host, resp, resp_with_error, with_cors};
 
 #[derive(Clone)]
 struct AppState {
@@ -40,7 +42,11 @@ struct AppState {
 
 #[derive(Clone)]
 struct StdClock;
-impl Clock for StdClock { fn now(&self) -> std::time::SystemTime { std::time::SystemTime::now() } }
+impl Clock for StdClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+}
 
 #[derive(serde::Deserialize)]
 struct CreateLinkReq {
@@ -111,7 +117,9 @@ struct AddMemberReq {
     role: String,
 }
 
-fn default_role() -> String { "editor".into() }
+fn default_role() -> String {
+    "editor".into()
+}
 
 #[derive(serde::Serialize)]
 struct GroupOut {
@@ -225,7 +233,11 @@ async fn main() -> Result<(), Error> {
     warn_if_insecure_skip_sig();
 
     let repo = DynamoRepo::from_env().map_err(|e| format!("dynamo init error: {e}"))?;
-    let state = AppState { repo, slugger: Base62SlugGenerator::new(5), clock: StdClock };
+    let state = AppState {
+        repo,
+        slugger: Base62SlugGenerator::new(5),
+        clock: StdClock,
+    };
 
     let handler = service_fn(move |req: Request| {
         let st = state.clone();
@@ -250,12 +262,15 @@ fn warn_if_insecure_skip_sig() {
     }
 }
 
-fn matches_ignore_case(s: &str, any: &[&str]) -> bool { any.iter().any(|t| s.eq_ignore_ascii_case(t)) }
+fn matches_ignore_case(s: &str, any: &[&str]) -> bool {
+    any.iter().any(|t| s.eq_ignore_ascii_case(t))
+}
 
 /// Check if the given email is in the ADMIN_EMAILS list.
 fn is_admin(email: &str) -> bool {
     let admins = std::env::var("ADMIN_EMAILS").unwrap_or_default();
-    admins.split(',')
+    admins
+        .split(',')
         .map(|s| s.trim())
         .any(|admin| admin.eq_ignore_ascii_case(email))
 }
@@ -277,21 +292,33 @@ async fn route(state: AppState, req: Request) -> Result<Response<Body>, Error> {
         return match method.as_str() {
             "OPTIONS" => Ok(with_cors(resp(204, None, None))),
             "POST" => bulk_delete_links(state, req).await,
-            _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+            _ => Ok(with_cors(resp(
+                405,
+                None,
+                Some(http_common::json_err("method_not_allowed")),
+            ))),
         };
     }
     if path == "/api/links/bulk/activate" {
         return match method.as_str() {
             "OPTIONS" => Ok(with_cors(resp(204, None, None))),
             "POST" => bulk_activate_links(state, req).await,
-            _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+            _ => Ok(with_cors(resp(
+                405,
+                None,
+                Some(http_common::json_err("method_not_allowed")),
+            ))),
         };
     }
     if path == "/api/links/bulk/deactivate" {
         return match method.as_str() {
             "OPTIONS" => Ok(with_cors(resp(204, None, None))),
             "POST" => bulk_deactivate_links(state, req).await,
-            _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+            _ => Ok(with_cors(resp(
+                405,
+                None,
+                Some(http_common::json_err("method_not_allowed")),
+            ))),
         };
     }
 
@@ -303,7 +330,11 @@ async fn route(state: AppState, req: Request) -> Result<Response<Body>, Error> {
             "OPTIONS" => Ok(with_cors(resp(204, None, None))),
             "PATCH" => update_link(state, req, slug).await,
             "DELETE" => delete_link(state, req, slug).await,
-            _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+            _ => Ok(with_cors(resp(
+                405,
+                None,
+                Some(http_common::json_err("method_not_allowed")),
+            ))),
         };
     }
 
@@ -322,7 +353,11 @@ async fn route(state: AppState, req: Request) -> Result<Response<Body>, Error> {
                     "OPTIONS" => Ok(with_cors(resp(204, None, None))),
                     "GET" => list_group_members(state, req, group_id).await,
                     "POST" => add_group_member(state, req, group_id).await,
-                    _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+                    _ => Ok(with_cors(resp(
+                        405,
+                        None,
+                        Some(http_common::json_err("method_not_allowed")),
+                    ))),
                 };
             } else if after_members.starts_with('/') && after_members.len() > 1 {
                 // /api/groups/{id}/members/{email}
@@ -330,7 +365,11 @@ async fn route(state: AppState, req: Request) -> Result<Response<Body>, Error> {
                 return match method.as_str() {
                     "OPTIONS" => Ok(with_cors(resp(204, None, None))),
                     "DELETE" => remove_group_member(state, req, group_id, member_email).await,
-                    _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+                    _ => Ok(with_cors(resp(
+                        405,
+                        None,
+                        Some(http_common::json_err("method_not_allowed")),
+                    ))),
                 };
             }
         }
@@ -338,41 +377,78 @@ async fn route(state: AppState, req: Request) -> Result<Response<Body>, Error> {
 
     // Group routes: /api/groups/{id}
     let groups_prefix = "/api/groups/";
-    if path.starts_with(groups_prefix) && path.len() > groups_prefix.len() && !path.contains("/members") {
+    if path.starts_with(groups_prefix)
+        && path.len() > groups_prefix.len()
+        && !path.contains("/members")
+    {
         let group_id = path[groups_prefix.len()..].to_string();
         return match method.as_str() {
             "OPTIONS" => Ok(with_cors(resp(204, None, None))),
             "GET" => get_group(state, req, group_id).await,
             "PATCH" => update_group(state, req, group_id).await,
             "DELETE" => delete_group(state, req, group_id).await,
-            _ => Ok(with_cors(resp(405, None, Some(http_common::json_err("method_not_allowed"))))),
+            _ => Ok(with_cors(resp(
+                405,
+                None,
+                Some(http_common::json_err("method_not_allowed")),
+            ))),
         };
     }
 
     match (method.as_str(), path.as_str()) {
-        ("OPTIONS", "/api/links") | ("OPTIONS", "/api/me") | ("OPTIONS", "/api/groups") => Ok(with_cors(resp(204, None, None))),
+        ("OPTIONS", "/api/links") | ("OPTIONS", "/api/me") | ("OPTIONS", "/api/groups") => {
+            Ok(with_cors(resp(204, None, None)))
+        }
         ("POST", "/api/links") => create_link(state, req).await,
         ("GET", "/api/links") => list_links(state, req).await,
         ("GET", "/api/me") => get_me(req).await,
         ("GET", "/api/groups") => list_groups(state, req).await,
         ("POST", "/api/groups") => create_group(state, req).await,
-        _ => Ok(with_cors(resp(404, None, Some(http_common::json_err("not_found")))))
+        _ => Ok(with_cors(resp(
+            404,
+            None,
+            Some(http_common::json_err("not_found")),
+        ))),
     }
 }
 
 async fn create_link(state: AppState, req: Request) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email in token"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email in token",
+            )))
+        }
     };
 
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -380,12 +456,22 @@ async fn create_link(state: AppState, req: Request) -> Result<Response<Body>, Er
 
     let payload: CreateLinkReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     // Validate URL
     if let Err(e) = domain::validate::validate_original_url(&payload.original_url) {
-        return Ok(with_cors(resp_with_error(400, "invalid_request", &format!("{}", e))));
+        return Ok(with_cors(resp_with_error(
+            400,
+            "invalid_request",
+            &format!("{}", e),
+        )));
     }
 
     // Prepare created_at
@@ -393,22 +479,47 @@ async fn create_link(state: AppState, req: Request) -> Result<Response<Body>, Er
 
     // Determine slug
     let slug = if let Some(alias) = &payload.alias {
-        if !http_common::is_valid_alias(alias) { return Ok(with_cors(resp_with_error(400, "invalid_request", "alias must be base62 length 3..32"))); }
-        match Slug::new(alias.clone()) { Ok(s) => s, Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid alias"))) }
+        if !http_common::is_valid_alias(alias) {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "alias must be base62 length 3..32",
+            )));
+        }
+        match Slug::new(alias.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                return Ok(with_cors(resp_with_error(
+                    400,
+                    "invalid_request",
+                    "invalid alias",
+                )))
+            }
+        }
     } else {
         let id = match state.repo.increment_global_counter() {
             Ok(v) => v,
-            Err(e) => { error!(err=?e, "counter error"); return Ok(with_cors(resp_with_error(500, "internal", "counter failure"))); }
+            Err(e) => {
+                error!(err=?e, "counter error");
+                return Ok(with_cors(resp_with_error(
+                    500,
+                    "internal",
+                    "counter failure",
+                )));
+            }
         };
         state.slugger.next_slug(id)
     };
 
     // Persist
-    let mut link = domain::ShortLink::new(slug, payload.original_url.clone(), created_at, user_email);
+    let mut link =
+        domain::ShortLink::new(slug, payload.original_url.clone(), created_at, user_email);
 
     // Apply optional fields
     link.description = payload.description;
-    link.activate_at = payload.activate_at.and_then(|s| http_common::parse_rfc3339(&s).ok());
+    link.activate_at = payload
+        .activate_at
+        .and_then(|s| http_common::parse_rfc3339(&s).ok());
     link.redirect_delay = payload.redirect_delay;
     link.group_id = payload.group_id;
 
@@ -416,20 +527,49 @@ async fn create_link(state: AppState, req: Request) -> Result<Response<Body>, Er
         Ok(()) => {
             let host = get_host(&req);
             info!(slug = %link.slug.as_str(), "create ok");
-            Ok(with_cors(resp(201, None, Some(serde_json::to_value(link_to_out(link, host)).expect("LinkOut serialization")))))
+            Ok(with_cors(resp(
+                201,
+                None,
+                Some(serde_json::to_value(link_to_out(link, host)).expect("LinkOut serialization")),
+            )))
         }
-        Err(CoreError::AlreadyExists) => Ok(with_cors(resp_with_error(409, "conflict", "alias already exists"))),
-        Err(CoreError::InvalidUrl(_)) | Err(CoreError::InvalidSlug(_)) => Ok(with_cors(resp_with_error(400, "invalid_request", "invalid input"))),
-        Err(e) => { error!(err=?e, "create error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(CoreError::AlreadyExists) => Ok(with_cors(resp_with_error(
+            409,
+            "conflict",
+            "alias already exists",
+        ))),
+        Err(CoreError::InvalidUrl(_)) | Err(CoreError::InvalidSlug(_)) => Ok(with_cors(
+            resp_with_error(400, "invalid_request", "invalid input"),
+        )),
+        Err(e) => {
+            error!(err=?e, "create error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<Response<Body>, Error> {
+async fn update_link(
+    state: AppState,
+    req: Request,
+    slug_str: String,
+) -> Result<Response<Body>, Error> {
     // Auth required
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_is_admin = is_admin(&verified.email);
@@ -437,12 +577,24 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
     // Parse slug
     let slug = match Slug::new(slug_str.clone()) {
         Ok(s) => s,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid slug"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "invalid slug",
+            )))
+        }
     };
 
     // Parse body
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -450,14 +602,29 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
 
     let payload: UpdateLinkReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     // Get existing link
     let mut link = match state.repo.get(&slug) {
         Ok(Some(l)) => l,
-        Ok(None) => return Ok(with_cors(resp_with_error(404, "not_found", "link not found"))),
-        Err(e) => { error!(err=?e, "get error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+        Ok(None) => {
+            return Ok(with_cors(resp_with_error(
+                404,
+                "not_found",
+                "link not found",
+            )))
+        }
+        Err(e) => {
+            error!(err=?e, "get error");
+            return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+        }
     };
 
     // Authorization: check if user can edit this link
@@ -478,14 +645,22 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
 
         if !can_edit_via_group {
             warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized edit attempt");
-            return Ok(with_cors(resp_with_error(403, "forbidden", "you can only edit your own links or links in groups you have editor access to")));
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "you can only edit your own links or links in groups you have editor access to",
+            )));
         }
     }
 
     // Apply updates
     if let Some(new_url) = payload.original_url {
         if let Err(e) = domain::validate::validate_original_url(&new_url) {
-            return Ok(with_cors(resp_with_error(400, "invalid_request", &format!("{}", e))));
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                &format!("{}", e),
+            )));
         }
         link.original_url = new_url;
     }
@@ -498,12 +673,16 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
     // Handle expires_at: Some(Some(str)) = set, Some(None) = clear, None = no change
     if let Some(expires_opt) = payload.expires_at {
         link.expires_at = match expires_opt {
-            Some(ts_str) => {
-                match http_common::rfc3339_to_system_time(&ts_str) {
-                    Ok(t) => Some(t),
-                    Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid expires_at format, use ISO 8601"))),
+            Some(ts_str) => match http_common::rfc3339_to_system_time(&ts_str) {
+                Ok(t) => Some(t),
+                Err(_) => {
+                    return Ok(with_cors(resp_with_error(
+                        400,
+                        "invalid_request",
+                        "invalid expires_at format, use ISO 8601",
+                    )))
                 }
-            }
+            },
             None => None, // Clear expiration
         };
     }
@@ -523,33 +702,72 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
         Ok(()) => {
             let host = get_host(&req);
             info!(slug = %link.slug.as_str(), "update ok");
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(link_to_out(link, host)).expect("LinkOut serialization")))))
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(link_to_out(link, host)).expect("LinkOut serialization")),
+            )))
         }
-        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(404, "not_found", "link not found"))),
-        Err(e) => { error!(err=?e, "update error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(
+            404,
+            "not_found",
+            "link not found",
+        ))),
+        Err(e) => {
+            error!(err=?e, "update error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
 async fn get_me(req: Request) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_info = UserInfo {
         email: verified.email.clone(),
         is_admin: is_admin(&verified.email),
     };
-    Ok(with_cors(resp(200, None, Some(serde_json::to_value(user_info).expect("UserInfo serialization")))))
+    Ok(with_cors(resp(
+        200,
+        None,
+        Some(serde_json::to_value(user_info).expect("UserInfo serialization")),
+    )))
 }
 
 async fn list_links(state: AppState, req: Request) -> Result<Response<Body>, Error> {
     // Auth required
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email_str = verified.email.clone();
@@ -584,7 +802,11 @@ async fn list_links(state: AppState, req: Request) -> Result<Response<Body>, Err
             }
             Ok(None) => {
                 // User is NOT a member - deny access to this group's links
-                return Ok(with_cors(resp_with_error(403, "forbidden", "you are not a member of this group")));
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "you are not a member of this group",
+                )));
             }
             Err(e) => {
                 error!(err=?e, "get member error");
@@ -608,23 +830,56 @@ async fn list_links(state: AppState, req: Request) -> Result<Response<Body>, Err
     match state.repo.list_paginated(&options) {
         Ok(result) => {
             let host = get_host(&req);
-            let links: Vec<LinkOut> = result.items.into_iter()
+            let links: Vec<LinkOut> = result
+                .items
+                .into_iter()
                 .map(|l| link_to_out(l, host))
                 .collect();
-            let user = UserInfo { email: user_email_str, is_admin: user_is_admin };
-            let out = ListOut { links, total: result.total, has_more: result.has_more, user: Some(user) };
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(out).expect("ListOut serialization")))))
+            let user = UserInfo {
+                email: user_email_str,
+                is_admin: user_is_admin,
+            };
+            let out = ListOut {
+                links,
+                total: result.total,
+                has_more: result.has_more,
+                user: Some(user),
+            };
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(out).expect("ListOut serialization")),
+            )))
         }
-        Err(e) => { error!(err=?e, "list error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "list error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn delete_link(state: AppState, req: Request, slug_str: String) -> Result<Response<Body>, Error> {
+async fn delete_link(
+    state: AppState,
+    req: Request,
+    slug_str: String,
+) -> Result<Response<Body>, Error> {
     // Auth required
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_is_admin = is_admin(&verified.email);
@@ -632,14 +887,29 @@ async fn delete_link(state: AppState, req: Request, slug_str: String) -> Result<
     // Parse slug
     let slug = match Slug::new(slug_str.clone()) {
         Ok(s) => s,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid slug"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "invalid slug",
+            )))
+        }
     };
 
     // Get existing link to check ownership
     let link = match state.repo.get(&slug) {
         Ok(Some(l)) => l,
-        Ok(None) => return Ok(with_cors(resp_with_error(404, "not_found", "link not found"))),
-        Err(e) => { error!(err=?e, "get error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+        Ok(None) => {
+            return Ok(with_cors(resp_with_error(
+                404,
+                "not_found",
+                "link not found",
+            )))
+        }
+        Err(e) => {
+            error!(err=?e, "get error");
+            return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+        }
     };
 
     // Authorization: check if user can delete this link
@@ -660,7 +930,11 @@ async fn delete_link(state: AppState, req: Request, slug_str: String) -> Result<
 
         if !can_delete_via_group {
             warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized delete attempt");
-            return Ok(with_cors(resp_with_error(403, "forbidden", "you can only delete your own links or links in groups you have editor access to")));
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "you can only delete your own links or links in groups you have editor access to",
+            )));
         }
     }
 
@@ -671,8 +945,15 @@ async fn delete_link(state: AppState, req: Request, slug_str: String) -> Result<
             info!(slug = %slug_str, "delete ok");
             Ok(with_cors(resp(204, None, None)))
         }
-        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(404, "not_found", "link not found"))),
-        Err(e) => { error!(err=?e, "delete error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(
+            404,
+            "not_found",
+            "link not found",
+        ))),
+        Err(e) => {
+            error!(err=?e, "delete error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
@@ -680,18 +961,40 @@ async fn bulk_delete_links(state: AppState, req: Request) -> Result<Response<Bod
     // Auth required
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     // Only admins can bulk delete
     if !is_admin(&verified.email) {
-        return Ok(with_cors(resp_with_error(403, "forbidden", "admin required for bulk operations")));
+        return Ok(with_cors(resp_with_error(
+            403,
+            "forbidden",
+            "admin required for bulk operations",
+        )));
     }
 
     // Parse body
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -699,25 +1002,44 @@ async fn bulk_delete_links(state: AppState, req: Request) -> Result<Response<Bod
 
     let payload: BulkSlugsReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     // Parse slugs
-    let slugs: Vec<Slug> = payload.slugs.iter()
+    let slugs: Vec<Slug> = payload
+        .slugs
+        .iter()
         .filter_map(|s| Slug::new(s.clone()).ok())
         .collect();
 
     if slugs.is_empty() {
-        return Ok(with_cors(resp_with_error(400, "invalid_request", "no valid slugs provided")));
+        return Ok(with_cors(resp_with_error(
+            400,
+            "invalid_request",
+            "no valid slugs provided",
+        )));
     }
 
     let deleted_at = state.clock.now();
     match state.repo.bulk_delete(&slugs, deleted_at) {
         Ok(affected) => {
             info!(count = affected, "bulk delete ok");
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(BulkResultOut { affected }).expect("serialize")))))
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(BulkResultOut { affected }).expect("serialize")),
+            )))
         }
-        Err(e) => { error!(err=?e, "bulk delete error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "bulk delete error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
@@ -729,22 +1051,48 @@ async fn bulk_deactivate_links(state: AppState, req: Request) -> Result<Response
     bulk_update_active_impl(state, req, false).await
 }
 
-async fn bulk_update_active_impl(state: AppState, req: Request, is_active: bool) -> Result<Response<Body>, Error> {
+async fn bulk_update_active_impl(
+    state: AppState,
+    req: Request,
+    is_active: bool,
+) -> Result<Response<Body>, Error> {
     // Auth required
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     // Only admins can bulk update
     if !is_admin(&verified.email) {
-        return Ok(with_cors(resp_with_error(403, "forbidden", "admin required for bulk operations")));
+        return Ok(with_cors(resp_with_error(
+            403,
+            "forbidden",
+            "admin required for bulk operations",
+        )));
     }
 
     // Parse body
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -752,25 +1100,48 @@ async fn bulk_update_active_impl(state: AppState, req: Request, is_active: bool)
 
     let payload: BulkSlugsReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     // Parse slugs
-    let slugs: Vec<Slug> = payload.slugs.iter()
+    let slugs: Vec<Slug> = payload
+        .slugs
+        .iter()
         .filter_map(|s| Slug::new(s.clone()).ok())
         .collect();
 
     if slugs.is_empty() {
-        return Ok(with_cors(resp_with_error(400, "invalid_request", "no valid slugs provided")));
+        return Ok(with_cors(resp_with_error(
+            400,
+            "invalid_request",
+            "no valid slugs provided",
+        )));
     }
 
     let updated_at = state.clock.now();
     match state.repo.bulk_update_active(&slugs, is_active, updated_at) {
         Ok(affected) => {
-            info!(count = affected, is_active = is_active, "bulk update active ok");
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(BulkResultOut { affected }).expect("serialize")))))
+            info!(
+                count = affected,
+                is_active = is_active,
+                "bulk update active ok"
+            );
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(BulkResultOut { affected }).expect("serialize")),
+            )))
         }
-        Err(e) => { error!(err=?e, "bulk update error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "bulk update error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
@@ -781,41 +1152,91 @@ async fn bulk_update_active_impl(state: AppState, req: Request, is_active: bool)
 async fn list_groups(state: AppState, req: Request) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     match state.repo.get_user_groups(&user_email) {
         Ok(groups_with_roles) => {
-            let groups: Vec<GroupOut> = groups_with_roles.iter()
+            let groups: Vec<GroupOut> = groups_with_roles
+                .iter()
                 .map(|(g, r)| group_to_out(g, Some(*r)))
                 .collect();
             let out = GroupListOut { groups };
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(out).expect("serialize")))))
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(out).expect("serialize")),
+            )))
         }
-        Err(e) => { error!(err=?e, "list groups error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "list groups error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
 async fn create_group(state: AppState, req: Request) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -823,11 +1244,21 @@ async fn create_group(state: AppState, req: Request) -> Result<Response<Body>, E
 
     let payload: CreateGroupReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     if payload.name.is_empty() || payload.name.len() > 100 {
-        return Ok(with_cors(resp_with_error(400, "invalid_request", "name must be 1-100 characters")));
+        return Ok(with_cors(resp_with_error(
+            400,
+            "invalid_request",
+            "name must be 1-100 characters",
+        )));
     }
 
     // Generate a unique group ID
@@ -862,26 +1293,63 @@ async fn create_group(state: AppState, req: Request) -> Result<Response<Body>, E
     }
 
     info!(group_id = %group_id, "group created");
-    Ok(with_cors(resp(201, None, Some(serde_json::to_value(group_to_out(&group, Some(GroupRole::Admin))).expect("serialize")))))
+    Ok(with_cors(resp(
+        201,
+        None,
+        Some(
+            serde_json::to_value(group_to_out(&group, Some(GroupRole::Admin))).expect("serialize"),
+        ),
+    )))
 }
 
-async fn get_group(state: AppState, req: Request, group_id: String) -> Result<Response<Body>, Error> {
+async fn get_group(
+    state: AppState,
+    req: Request,
+    group_id: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // Get group
     let group = match state.repo.get_group(&group_id) {
         Ok(Some(g)) => g,
-        Ok(None) => return Ok(with_cors(resp_with_error(404, "not_found", "group not found"))),
-        Err(e) => { error!(err=?e, "get group error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+        Ok(None) => {
+            return Ok(with_cors(resp_with_error(
+                404,
+                "not_found",
+                "group not found",
+            )))
+        }
+        Err(e) => {
+            error!(err=?e, "get group error");
+            return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+        }
     };
 
     // Check membership (unless admin)
@@ -891,46 +1359,105 @@ async fn get_group(state: AppState, req: Request, group_id: String) -> Result<Re
     } else {
         match state.repo.get_member(&group_id, &user_email) {
             Ok(Some(m)) => Some(m.role),
-            Ok(None) => return Ok(with_cors(resp_with_error(403, "forbidden", "you are not a member of this group"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(None) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "you are not a member of this group",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     };
 
-    Ok(with_cors(resp(200, None, Some(serde_json::to_value(group_to_out(&group, member_role)).expect("serialize")))))
+    Ok(with_cors(resp(
+        200,
+        None,
+        Some(serde_json::to_value(group_to_out(&group, member_role)).expect("serialize")),
+    )))
 }
 
-async fn update_group(state: AppState, req: Request, group_id: String) -> Result<Response<Body>, Error> {
+async fn update_group(
+    state: AppState,
+    req: Request,
+    group_id: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // Get existing group
     let mut group = match state.repo.get_group(&group_id) {
         Ok(Some(g)) => g,
-        Ok(None) => return Ok(with_cors(resp_with_error(404, "not_found", "group not found"))),
-        Err(e) => { error!(err=?e, "get group error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+        Ok(None) => {
+            return Ok(with_cors(resp_with_error(
+                404,
+                "not_found",
+                "group not found",
+            )))
+        }
+        Err(e) => {
+            error!(err=?e, "get group error");
+            return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+        }
     };
 
     // Check if user has admin access
     let is_system_admin = is_admin(&verified.email);
     if !is_system_admin {
         match state.repo.get_member(&group_id, &user_email) {
-            Ok(Some(m)) if m.role.can_manage() => {},
-            Ok(_) => return Ok(with_cors(resp_with_error(403, "forbidden", "admin role required to update group"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(Some(m)) if m.role.can_manage() => {}
+            Ok(_) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "admin role required to update group",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     }
 
     // Parse body
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -938,13 +1465,23 @@ async fn update_group(state: AppState, req: Request, group_id: String) -> Result
 
     let payload: UpdateGroupReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     // Apply updates
     if let Some(name) = payload.name {
         if name.is_empty() || name.len() > 100 {
-            return Ok(with_cors(resp_with_error(400, "invalid_request", "name must be 1-100 characters")));
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "name must be 1-100 characters",
+            )));
         }
         group.name = name;
     }
@@ -955,23 +1492,56 @@ async fn update_group(state: AppState, req: Request, group_id: String) -> Result
     match state.repo.update_group(&group) {
         Ok(()) => {
             info!(group_id = %group_id, "group updated");
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(group_to_out(&group, None)).expect("serialize")))))
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(group_to_out(&group, None)).expect("serialize")),
+            )))
         }
-        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(404, "not_found", "group not found"))),
-        Err(e) => { error!(err=?e, "update group error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(
+            404,
+            "not_found",
+            "group not found",
+        ))),
+        Err(e) => {
+            error!(err=?e, "update group error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn delete_group(state: AppState, req: Request, group_id: String) -> Result<Response<Body>, Error> {
+async fn delete_group(
+    state: AppState,
+    req: Request,
+    group_id: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // Check if group exists
@@ -984,9 +1554,18 @@ async fn delete_group(state: AppState, req: Request, group_id: String) -> Result
     let is_system_admin = is_admin(&verified.email);
     if !is_system_admin {
         match state.repo.get_member(&group_id, &user_email) {
-            Ok(Some(m)) if m.role.can_manage() => {},
-            Ok(_) => return Ok(with_cors(resp_with_error(403, "forbidden", "admin role required to delete group"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(Some(m)) if m.role.can_manage() => {}
+            Ok(_) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "admin role required to delete group",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     }
 
@@ -995,30 +1574,68 @@ async fn delete_group(state: AppState, req: Request, group_id: String) -> Result
             info!(group_id = %group_id, "group deleted");
             Ok(with_cors(resp(204, None, None)))
         }
-        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(404, "not_found", "group not found"))),
-        Err(e) => { error!(err=?e, "delete group error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(CoreError::NotFound) => Ok(with_cors(resp_with_error(
+            404,
+            "not_found",
+            "group not found",
+        ))),
+        Err(e) => {
+            error!(err=?e, "delete group error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn list_group_members(state: AppState, req: Request, group_id: String) -> Result<Response<Body>, Error> {
+async fn list_group_members(
+    state: AppState,
+    req: Request,
+    group_id: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // Check membership (unless system admin)
     let is_system_admin = is_admin(&verified.email);
     if !is_system_admin {
         match state.repo.get_member(&group_id, &user_email) {
-            Ok(Some(_)) => {},
-            Ok(None) => return Ok(with_cors(resp_with_error(403, "forbidden", "you are not a member of this group"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "you are not a member of this group",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     }
 
@@ -1027,37 +1644,81 @@ async fn list_group_members(state: AppState, req: Request, group_id: String) -> 
             let out = MemberListOut {
                 members: members.iter().map(member_to_out).collect(),
             };
-            Ok(with_cors(resp(200, None, Some(serde_json::to_value(out).expect("serialize")))))
+            Ok(with_cors(resp(
+                200,
+                None,
+                Some(serde_json::to_value(out).expect("serialize")),
+            )))
         }
-        Err(e) => { error!(err=?e, "list members error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "list members error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn add_group_member(state: AppState, req: Request, group_id: String) -> Result<Response<Body>, Error> {
+async fn add_group_member(
+    state: AppState,
+    req: Request,
+    group_id: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // Check if user has admin access to the group
     let is_system_admin = is_admin(&verified.email);
     if !is_system_admin {
         match state.repo.get_member(&group_id, &user_email) {
-            Ok(Some(m)) if m.role.can_manage() => {},
-            Ok(_) => return Ok(with_cors(resp_with_error(403, "forbidden", "admin role required to add members"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(Some(m)) if m.role.can_manage() => {}
+            Ok(_) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "admin role required to add members",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     }
 
     // Parse body
     let body_str = match req.body() {
-        Body::Empty => return Ok(with_cors(resp_with_error(400, "invalid_request", "missing body"))),
+        Body::Empty => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "missing body",
+            )))
+        }
         Body::Text(s) => s.clone(),
         Body::Binary(b) => String::from_utf8(b.clone()).unwrap_or_default(),
         _ => String::new(),
@@ -1065,17 +1726,35 @@ async fn add_group_member(state: AppState, req: Request, group_id: String) -> Re
 
     let payload: AddMemberReq = match serde_json::from_str(&body_str) {
         Ok(p) => p,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "bad json"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "bad json",
+            )))
+        }
     };
 
     let new_member_email = match UserEmail::new(payload.email.clone()) {
         Ok(e) => e,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "invalid email",
+            )))
+        }
     };
 
     let role = match GroupRole::from_str(&payload.role) {
         Some(r) => r,
-        None => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid role, use: viewer, editor, or admin"))),
+        None => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "invalid role, use: viewer, editor, or admin",
+            )))
+        }
     };
 
     let member = GroupMember {
@@ -1089,38 +1768,84 @@ async fn add_group_member(state: AppState, req: Request, group_id: String) -> Re
     match state.repo.add_member(member.clone()) {
         Ok(()) => {
             info!(group_id = %group_id, member = %payload.email, "member added");
-            Ok(with_cors(resp(201, None, Some(serde_json::to_value(member_to_out(&member)).expect("serialize")))))
+            Ok(with_cors(resp(
+                201,
+                None,
+                Some(serde_json::to_value(member_to_out(&member)).expect("serialize")),
+            )))
         }
-        Err(e) => { error!(err=?e, "add member error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "add member error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-async fn remove_group_member(state: AppState, req: Request, group_id: String, member_email_str: String) -> Result<Response<Body>, Error> {
+async fn remove_group_member(
+    state: AppState,
+    req: Request,
+    group_id: String,
+    member_email_str: String,
+) -> Result<Response<Body>, Error> {
     let verified = match verify_request_user(&req).await {
         Ok(v) => v,
-        Err(AuthHttp::Unauthorized) => return Ok(with_cors(resp_with_error(401, "unauthorized", "missing or invalid token"))),
-        Err(AuthHttp::Forbidden) => return Ok(with_cors(resp_with_error(403, "forbidden", "domain not allowed"))),
+        Err(AuthHttp::Unauthorized) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "missing or invalid token",
+            )))
+        }
+        Err(AuthHttp::Forbidden) => {
+            return Ok(with_cors(resp_with_error(
+                403,
+                "forbidden",
+                "domain not allowed",
+            )))
+        }
     };
 
     let user_email = match UserEmail::new(verified.email.clone()) {
         Ok(u) => u,
-        Err(_) => return Ok(with_cors(resp_with_error(401, "unauthorized", "invalid user email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email",
+            )))
+        }
     };
 
     // URL decode the email (it may contain @)
-    let member_email_decoded = urlencoding::decode(&member_email_str).unwrap_or_else(|_| member_email_str.clone().into());
+    let member_email_decoded =
+        urlencoding::decode(&member_email_str).unwrap_or_else(|_| member_email_str.clone().into());
     let member_email = match UserEmail::new(member_email_decoded.to_string()) {
         Ok(e) => e,
-        Err(_) => return Ok(with_cors(resp_with_error(400, "invalid_request", "invalid email"))),
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                400,
+                "invalid_request",
+                "invalid email",
+            )))
+        }
     };
 
     // Check if user has admin access to the group
     let is_system_admin = is_admin(&verified.email);
     if !is_system_admin {
         match state.repo.get_member(&group_id, &user_email) {
-            Ok(Some(m)) if m.role.can_manage() => {},
-            Ok(_) => return Ok(with_cors(resp_with_error(403, "forbidden", "admin role required to remove members"))),
-            Err(e) => { error!(err=?e, "get member error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
+            Ok(Some(m)) if m.role.can_manage() => {}
+            Ok(_) => {
+                return Ok(with_cors(resp_with_error(
+                    403,
+                    "forbidden",
+                    "admin role required to remove members",
+                )))
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
         }
     }
 
@@ -1129,15 +1854,25 @@ async fn remove_group_member(state: AppState, req: Request, group_id: String, me
             info!(group_id = %group_id, member = %member_email_decoded, "member removed");
             Ok(with_cors(resp(204, None, None)))
         }
-        Err(e) => { error!(err=?e, "remove member error"); Ok(with_cors(resp_with_error(500, "internal", "server error"))) }
+        Err(e) => {
+            error!(err=?e, "remove member error");
+            Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
     }
 }
 
-enum AuthHttp { Unauthorized, Forbidden }
+enum AuthHttp {
+    Unauthorized,
+    Forbidden,
+}
 
 async fn verify_request_user(req: &Request) -> Result<VerifiedUser, AuthHttp> {
     // Find Authorization header
-    let auth = req.headers().get("authorization").and_then(|v| v.to_str().ok()).ok_or(AuthHttp::Unauthorized)?;
+    let auth = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AuthHttp::Unauthorized)?;
     let token = auth.strip_prefix("Bearer ").ok_or(AuthHttp::Unauthorized)?;
     let aud = std::env::var("GOOGLE_OAUTH_CLIENT_ID").map_err(|_| AuthHttp::Unauthorized)?;
     let allowed = std::env::var("ALLOWED_DOMAIN").map_err(|_| AuthHttp::Unauthorized)?;
@@ -1147,7 +1882,10 @@ async fn verify_request_user(req: &Request) -> Result<VerifiedUser, AuthHttp> {
             warn!("auth failed: domain not allowed");
             Err(AuthHttp::Forbidden)
         }
-        Err(e) => { warn!(err=?e, "auth failed"); Err(AuthHttp::Unauthorized) }
+        Err(e) => {
+            warn!(err=?e, "auth failed");
+            Err(AuthHttp::Unauthorized)
+        }
     }
 }
 
