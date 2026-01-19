@@ -89,6 +89,7 @@ jobs:
           sam deploy \
             --stack-name url-shortener-dev \
             --template-file template.yaml \
+            --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
@@ -132,6 +133,7 @@ jobs:
           sam deploy \
             --stack-name url-shortener-prod \
             --template-file template.yaml \
+            --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
