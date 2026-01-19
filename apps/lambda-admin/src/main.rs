@@ -460,10 +460,26 @@ async fn update_link(state: AppState, req: Request, slug_str: String) -> Result<
         Err(e) => { error!(err=?e, "get error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
     };
 
-    // Authorization: non-admins can only edit their own links
+    // Authorization: check if user can edit this link
+    // - System admins can edit any link
+    // - Link creator can edit their own link
+    // - Group editors/admins can edit links in their group
     if !user_is_admin && link.created_by.as_str() != verified.email {
-        warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized edit attempt");
-        return Ok(with_cors(resp_with_error(403, "forbidden", "you can only edit your own links")));
+        // Check if link belongs to a group and user has edit access
+        let user_email = UserEmail::new(verified.email.clone()).unwrap();
+        let can_edit_via_group = if let Some(ref gid) = link.group_id {
+            match state.repo.get_member(gid, &user_email) {
+                Ok(Some(member)) => member.role.can_edit(),
+                _ => false,
+            }
+        } else {
+            false
+        };
+
+        if !can_edit_via_group {
+            warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized edit attempt");
+            return Ok(with_cors(resp_with_error(403, "forbidden", "you can only edit your own links or links in groups you have editor access to")));
+        }
     }
 
     // Apply updates
@@ -537,6 +553,7 @@ async fn list_links(state: AppState, req: Request) -> Result<Response<Body>, Err
     };
 
     let user_email_str = verified.email.clone();
+    let user_email = UserEmail::new(user_email_str.clone()).unwrap();
     let user_is_admin = is_admin(&user_email_str);
 
     // Parse query parameters
@@ -554,11 +571,29 @@ async fn list_links(state: AppState, req: Request) -> Result<Response<Body>, Err
 
     // Determine effective filter:
     // - Admins can see all links or filter by any creator
-    // - Non-admins can only see their own links (filter is forced)
+    // - Non-admins filtering by group_id: if they're a member, show all group links
+    // - Non-admins without group_id: only see their own links
     let created_by = if user_is_admin {
         created_by_filter.and_then(|e| UserEmail::new(e).ok())
+    } else if let Some(ref gid) = group_id {
+        // Check if user is a member of this group
+        match state.repo.get_member(gid, &user_email) {
+            Ok(Some(_)) => {
+                // User is a member - show all links in the group (no created_by filter)
+                None
+            }
+            Ok(None) => {
+                // User is NOT a member - deny access to this group's links
+                return Ok(with_cors(resp_with_error(403, "forbidden", "you are not a member of this group")));
+            }
+            Err(e) => {
+                error!(err=?e, "get member error");
+                return Ok(with_cors(resp_with_error(500, "internal", "server error")));
+            }
+        }
     } else {
-        Some(UserEmail::new(user_email_str.clone()).unwrap())
+        // No group filter - show only user's own links
+        Some(user_email.clone())
     };
 
     let options = domain::ListOptions {
@@ -607,10 +642,26 @@ async fn delete_link(state: AppState, req: Request, slug_str: String) -> Result<
         Err(e) => { error!(err=?e, "get error"); return Ok(with_cors(resp_with_error(500, "internal", "server error"))); }
     };
 
-    // Authorization: non-admins can only delete their own links
+    // Authorization: check if user can delete this link
+    // - System admins can delete any link
+    // - Link creator can delete their own link
+    // - Group editors/admins can delete links in their group
     if !user_is_admin && link.created_by.as_str() != verified.email {
-        warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized delete attempt");
-        return Ok(with_cors(resp_with_error(403, "forbidden", "you can only delete your own links")));
+        // Check if link belongs to a group and user has edit access
+        let user_email = UserEmail::new(verified.email.clone()).unwrap();
+        let can_delete_via_group = if let Some(ref gid) = link.group_id {
+            match state.repo.get_member(gid, &user_email) {
+                Ok(Some(member)) => member.role.can_edit(),
+                _ => false,
+            }
+        } else {
+            false
+        };
+
+        if !can_delete_via_group {
+            warn!(user = %verified.email, link_owner = %link.created_by.as_str(), "unauthorized delete attempt");
+            return Ok(with_cors(resp_with_error(403, "forbidden", "you can only delete your own links or links in groups you have editor access to")));
+        }
     }
 
     // Soft delete
