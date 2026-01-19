@@ -1,0 +1,146 @@
+name: Deploy AWS Lambdas
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'domain/**'
+      - 'adapters/**'
+      - 'apps/**'
+      - 'shared/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'infra/sam/**'
+      - '.github/workflows/deploy-lambdas.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  AWS_REGION: eu-north-1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Install cargo-lambda
+        run: pip install cargo-lambda
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build Lambda artifacts
+        run: make build-lambdas
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-artifacts
+          path: infra/sam/artifacts/
+          retention-days: 1
+
+  deploy-dev:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-artifacts
+          path: infra/sam/artifacts/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Deploy to dev
+        working-directory: infra/sam
+        run: |
+          sam deploy \
+            --stack-name url-shortener-dev \
+            --template-file template.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              StageName=dev \
+              AllowedDomain=${{ vars.ALLOWED_DOMAIN }} \
+              GoogleOAuthClientId=${{ vars.GOOGLE_OAUTH_CLIENT_ID }} \
+              ShortlinkDomain=${{ vars.SHORTLINK_DOMAIN }} \
+              CorsAllowOrigin=${{ vars.CORS_ALLOW_ORIGIN }} \
+              CustomDomainName=${{ vars.CUSTOM_DOMAIN_NAME }} \
+              CustomDomainCertificateArn=${{ vars.CUSTOM_DOMAIN_CERT_ARN }} \
+              AdminEmails=${{ vars.ADMIN_EMAILS }}
+
+  deploy-prod:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-artifacts
+          path: infra/sam/artifacts/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Deploy to prod
+        working-directory: infra/sam
+        run: |
+          sam deploy \
+            --stack-name url-shortener-prod \
+            --template-file template.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              StageName=prod \
+              AllowedDomain=${{ vars.ALLOWED_DOMAIN }} \
+              GoogleOAuthClientId=${{ vars.GOOGLE_OAUTH_CLIENT_ID }} \
+              ShortlinkDomain=${{ vars.SHORTLINK_DOMAIN }} \
+              CorsAllowOrigin=${{ vars.CORS_ALLOW_ORIGIN }} \
+              CustomDomainName=${{ vars.CUSTOM_DOMAIN_NAME }} \
+              CustomDomainCertificateArn=${{ vars.CUSTOM_DOMAIN_CERT_ARN }} \
+              AdminEmails=${{ vars.ADMIN_EMAILS }}
