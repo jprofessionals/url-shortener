@@ -9,7 +9,7 @@
 ## Project rules
 
 - Keep business logic in `domain/`, free of cloud SDKs and HTTP or storage implementations. Applications wire the domain to its adapters.
-- Preserve public access to redirects. Enforce admin API access on the server and verify ownership, group membership and administrator privileges where applicable. Keep `X-Debug-User` and Google signature bypass in isolated development environments.
+- Preserve public access to redirects. Enforce admin API access on the server and verify ownership, group membership and administrator privileges where applicable. Keep `X-Debug-User` in isolated local development environments.
 - Production data access for agents is `none`. Use synthetic data for development and verification. Refer to secrets by name and keep their values out of output, prompts and commits.
 - Use `Makefile` targets for manual deployment. Use the repository's GitHub Actions workflows for automated deployment and production promotion. See [deployment](README.md#deployment) when working on releases.
 

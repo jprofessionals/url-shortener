@@ -4,18 +4,18 @@ Scope: This document defines the Admin API contract and authentication behavior 
 
 #### 1. Authentication & Authorization
 - Transport: Authorization header only — `Authorization: Bearer <id_token>`.
-- Verification (default, production):
+- Google verification:
   - Verify JWT signature via Google JWKS (RS256).
   - Validate `aud` equals `GOOGLE_OAUTH_CLIENT_ID`.
   - Validate `iss` is one of Google issuers (`https://accounts.google.com`, `accounts.google.com`).
-  - Validate `exp` (token not expired) and `iat` sanity.
-  - Extract `email` and require it ends with `@<ALLOWED_DOMAIN>` (case‑insensitive). Domain source = email suffix; do not rely solely on `hd` claim.
-- Local/dev override: Signature verification may be disabled only if `GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE=1` is set. Apps MUST log a WARN when disabled. All other claim checks still apply.
+  - Require `sub` and validate `exp`.
+  - Require a verified email and a Google Workspace hosted domain (`hd`) matching `ALLOWED_DOMAIN` (case-insensitive).
+- The local API server supports `AUTH_PROVIDER=none` with `X-Debug-User` for isolated development.
 - Authorization model: Any authenticated user from the allowed domain is permitted to create and list links (single role: admin).
 
 HTTP failures related to auth:
 - 401 Unauthorized — missing/invalid token, signature failure, bad audience/issuer/expiry.
-- 403 Forbidden — token valid but email domain is not allowed.
+- 403 Forbidden — token valid but Google Workspace domain is missing or disallowed.
 
 #### 2. CORS
 - Header `Access-Control-Allow-Origin`: value taken from env `CORS_ALLOW_ORIGIN`; if unset, default to `*` in dev. For production, set explicit admin origin.

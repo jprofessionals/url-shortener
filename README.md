@@ -62,7 +62,8 @@ entry point using synthetic data.
 Keep `AUTH_DISABLED: false` in `admin-frontend/config.js`. Use a Google OAuth
 client ID for development in `GOOGLE_CLIENT_ID` and add `http://localhost:8000`
 to that client's authorized JavaScript origins. Start the API with the same
-client ID and the allowed email domain.
+client ID and the allowed Google Workspace domain. The API verifies the Google
+signature and requires a verified email and a matching hosted domain (`hd`).
 
 ```bash
 export ALLOWED_DOMAIN=example.com
