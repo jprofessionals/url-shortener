@@ -384,9 +384,9 @@ operator review template changes that add resources or change runtime IAM
 policies before deploying them.
 
 Use the environment secret `ADMIN_EMAILS` for administrator addresses.
-Verify OIDC in dev and then prod before removing the legacy
-`AWS_ACCESS_KEY_ID` repository variable and `AWS_SECRET_ACCESS_KEY` secret.
-The workflows use the legacy credential while an environment has no deploy role.
+GitHub Actions uses OIDC for automatic dev deployments and production
+promotions. Set the role on the matching GitHub environment before triggering
+either workflow.
 See [GitHub's AWS OIDC setup](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
 ## Admin frontend deployment
