@@ -17,41 +17,37 @@ on:
           - dev
           - prod
 
+permissions:
+  contents: read
+
 jobs:
-  deploy-dev:
+  deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.environment == 'dev')
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '20'
+          persist-credentials: false
 
-      - name: Deploy to Cloudflare Pages (dev)
-        uses: cloudflare/wrangler-action@v3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy admin-frontend --branch=dev --project-name=${{ vars.PAGES_PROJECT_NAME }}
+          node-version: '24'
+          package-manager-cache: false
 
-  deploy-prod:
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'
-    environment: prod
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install locked Wrangler
+        working-directory: admin-frontend
+        run: npm ci --ignore-scripts
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Deploy to Cloudflare Pages (prod)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy admin-frontend --branch=main --project-name=${{ vars.PAGES_PROJECT_NAME }}
+      - name: Deploy to Cloudflare Pages
+        working-directory: admin-frontend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT_NAME: ${{ vars.PAGES_PROJECT_NAME }}
+          PAGES_BRANCH: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
+        run: |
+          publish_dir=$(mktemp -d)
+          cp app.js config.js index.html "$publish_dir/"
+          ./node_modules/.bin/wrangler pages deploy "$publish_dir" \
+            --project-name="$PAGES_PROJECT_NAME" --branch="$PAGES_BRANCH"
