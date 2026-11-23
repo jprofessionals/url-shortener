@@ -3,7 +3,7 @@
 //! Purpose
 //! - Handle API Gateway HTTP API (v2) events.
 //! - Resolve `/:slug` via the `LinkService` backed by the DynamoDB adapter.
-//! - Return `308 Permanent Redirect` with `Location` header on success; map
+//! - Return `307 Temporary Redirect` with `Location` header on success; map
 //!   domain errors to sensible HTTP codes for API Gateway responses.
 //!
 //! Special URL suffixes:
@@ -20,6 +20,7 @@ use domain::service::LinkService;
 use domain::slug::Base62SlugGenerator;
 use domain::{Clock, LinkRepository, Slug};
 use http_common::lambda::resp;
+use lambda_http::http::header::{HeaderValue, CACHE_CONTROL};
 use lambda_http::{run, service_fn, Body, Error, Request, Response};
 use qrcode::render::svg;
 use qrcode::QrCode;
@@ -29,9 +30,17 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Wrap a response with CORS headers (allow all origins for public endpoints)
 fn with_cors(mut response: Response<Body>) -> Response<Body> {
-    use lambda_http::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN};
+    use lambda_http::http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
     let headers = response.headers_mut();
     headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    response
+}
+
+fn apply_cache_policy(mut response: Response<Body>) -> Response<Body> {
+    response
+        .headers_mut()
+        .entry(CACHE_CONTROL)
+        .or_insert(HeaderValue::from_static("no-store"));
     response
 }
 
@@ -98,7 +107,11 @@ async fn handle_request(
     // Expect a non-empty slug
     if slug_str.is_empty() {
         warn!(path = %raw_path, "empty slug in redirect");
-        return Ok(resp(400, None, Some(http_common::json_err("bad_request"))));
+        return Ok(apply_cache_policy(resp(
+            400,
+            None,
+            Some(http_common::json_err("bad_request")),
+        )));
     }
 
     // Determine request mode based on suffix
@@ -122,7 +135,8 @@ async fn handle_request(
         Ok(s) => s,
         Err(_) => {
             warn!(slug = %actual_slug_str, "invalid slug");
-            let r = resp(400, None, Some(http_common::json_err("invalid_slug")));
+            let r =
+                apply_cache_policy(resp(400, None, Some(http_common::json_err("invalid_slug"))));
             return Ok(if is_qr_request { with_cors(r) } else { r });
         }
     };
@@ -198,7 +212,7 @@ async fn handle_request(
                         }
                         info!(slug = %slug.as_str(), "resolve ok");
                         let target_url = redirect_target_url(&link.original_url, query);
-                        resp(308, Some(("Location", target_url)), None)
+                        resp(307, Some(("Location", target_url)), None)
                     }
                 }
             }
@@ -213,6 +227,7 @@ async fn handle_request(
         }
     };
 
+    let response = apply_cache_policy(response);
     // Wrap QR requests with CORS headers for cross-origin fetch from admin UI
     Ok(if is_qr_request {
         with_cors(response)
@@ -737,7 +752,6 @@ mod tests {
         path: &str,
         query: &str,
     ) -> Response<Body> {
-        let repo = InMemoryRepo::new();
         let mut link = ShortLink::new(
             Slug::new("sample").unwrap(),
             original_url.to_owned(),
@@ -745,7 +759,14 @@ mod tests {
             UserEmail::new("owner@example.test").unwrap(),
         );
         link.redirect_delay = delay;
-        repo.put(link).unwrap();
+        request_fixture(Some(link), path, query).await
+    }
+
+    async fn request_fixture(link: Option<ShortLink>, path: &str, query: &str) -> Response<Body> {
+        let repo = InMemoryRepo::new();
+        if let Some(link) = link {
+            repo.put(link).unwrap();
+        }
         let svc = LinkService::new(repo, Base62SlugGenerator::new(1), StdClock);
 
         let event = json!({
@@ -783,8 +804,9 @@ mod tests {
             ),
         ] {
             let response = request_link(original, None, "/sample", query).await;
-            assert_eq!(response.status(), 308);
+            assert_eq!(response.status(), 307);
             assert_eq!(response.headers()["location"], expected);
+            assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
         }
     }
 
@@ -798,6 +820,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
         let Body::Text(html) = response.body() else {
             panic!("expected HTML countdown response");
         };
@@ -828,8 +851,34 @@ mod tests {
             let baseline = request_link(original, Some(1), path, "").await;
             let tagged = request_link(original, Some(1), path, "utm_source=incoming").await;
             assert_eq!(tagged.status(), 200);
+            let cache = if path.ends_with(".qr") {
+                "public, max-age=86400"
+            } else {
+                "no-store"
+            };
+            assert_eq!(tagged.headers()[CACHE_CONTROL], cache);
             assert_eq!(tagged.headers(), baseline.headers());
             assert_eq!(tagged.body().as_ref(), baseline.body().as_ref());
+        }
+    }
+
+    #[tokio::test]
+    async fn unavailable_links_are_not_cached() {
+        let link = ShortLink::new(
+            Slug::new("sample").unwrap(),
+            "https://example.test".into(),
+            UNIX_EPOCH,
+            UserEmail::new("owner@example.test").unwrap(),
+        );
+        let mut inactive = link.clone();
+        inactive.is_active = false;
+        let mut expired = link;
+        expired.expires_at = Some(UNIX_EPOCH);
+
+        for (link, status) in [(None, 404), (Some(inactive), 404), (Some(expired), 410)] {
+            let response = request_fixture(link, "/sample", "").await;
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
         }
     }
 }

@@ -26,7 +26,7 @@ mod config;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use axum::http::HeaderValue;
+use axum::http::{header::CACHE_CONTROL, HeaderValue};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -491,13 +491,17 @@ fn is_admin(email: &str) -> bool {
 }
 
 async fn get_slug(State(state): State<AppState>, Path(slug): Path<String>) -> impl IntoResponse {
-    match Slug::new(slug.clone()) {
+    let now = state.clock.now();
+    let response = match Slug::new(slug) {
         Ok(s) => match state.repo.get(&s) {
-            Ok(Some(link)) => {
+            Ok(Some(link)) if link.is_available(now) => {
                 info!(slug = %s.as_str(), "resolve ok");
-                Redirect::permanent(&link.original_url).into_response()
+                Redirect::temporary(&link.original_url).into_response()
             }
-            Ok(None) => {
+            Ok(Some(link)) if !link.is_deleted() && link.is_expired(now) => {
+                (StatusCode::GONE, Json(http_common::json_err("gone"))).into_response()
+            }
+            Ok(_) => {
                 warn!(slug = %s.as_str(), "resolve 404");
                 (
                     StatusCode::NOT_FOUND,
@@ -522,7 +526,11 @@ async fn get_slug(State(state): State<AppState>, Path(slug): Path<String>) -> im
             )
                 .into_response()
         }
-    }
+    };
+    (
+        [(CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        response,
+    )
 }
 
 async fn create_link(
@@ -1441,7 +1449,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        // Resolve should redirect (308)
+        // Resolve should redirect (307)
         // We don't know slug from response easily here without parsing; call service directly for a known slug path.
         // Instead, create with custom slug and then resolve it
         let req = Request::builder()
@@ -1465,7 +1473,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(resp.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(
             resp.headers().get(header::LOCATION).unwrap(),
             "https://e2.com"
