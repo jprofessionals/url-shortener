@@ -18,7 +18,7 @@
 use aws_dynamo::DynamoRepo;
 use domain::service::LinkService;
 use domain::slug::Base62SlugGenerator;
-use domain::{Clock, Slug};
+use domain::{Clock, LinkRepository, Slug};
 use http_common::lambda::resp;
 use lambda_http::{run, service_fn, Body, Error, Request, Response};
 use qrcode::render::svg;
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Error> {
 
     let handler = service_fn(move |req: Request| {
         let st = state.clone();
-        async move { handle_request(st, req).await }
+        async move { handle_request(&st.svc, req).await }
     });
     run(handler).await?;
     Ok(())
@@ -85,11 +85,15 @@ enum RequestMode {
     CountdownRedirect { delay: u32 }, // Auto-redirect with countdown
 }
 
-async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>, Error> {
+async fn handle_request(
+    svc: &LinkService<impl LinkRepository, Base62SlugGenerator, StdClock>,
+    req: Request,
+) -> Result<Response<Body>, Error> {
     let raw_path = req.uri().path();
     // API Gateway HTTP API includes stage prefix in rawPath (e.g., /dev/abc123)
     // Strip the stage prefix if present by taking only the last path segment
     let slug_str = raw_path.rsplit('/').next().unwrap_or("");
+    let query = req.uri().query().unwrap_or_default();
 
     // Expect a non-empty slug
     if slug_str.is_empty() {
@@ -132,7 +136,7 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
     let short_url = format!("https://{}/{}{}", host, slug.as_str(), qr_suffix);
 
     // Get the full link to check is_active, expiration, and other status
-    let response = match state.svc.get(&slug) {
+    let response = match svc.get(&slug) {
         Ok(Some(link)) => {
             let now = std::time::SystemTime::now();
 
@@ -184,15 +188,17 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
                     }
                     RequestMode::CountdownRedirect { delay } => {
                         info!(slug = %slug.as_str(), delay = delay, "countdown redirect page");
-                        render_countdown_page(&link, &short_url, delay)
+                        let target_url = redirect_target_url(&link.original_url, query);
+                        render_countdown_page(&link, &target_url, delay)
                     }
                     RequestMode::Redirect => {
                         // Fire-and-forget click increment (don't fail redirect on counter error)
-                        if let Err(e) = state.svc.increment_click(&slug) {
+                        if let Err(e) = svc.increment_click(&slug) {
                             warn!(slug = %slug.as_str(), err = ?e, "click increment failed");
                         }
                         info!(slug = %slug.as_str(), redirect_to = %link.original_url, "resolve ok");
-                        resp(308, Some(("Location", link.original_url)), None)
+                        let target_url = redirect_target_url(&link.original_url, query);
+                        resp(308, Some(("Location", target_url)), None)
                     }
                 }
             }
@@ -213,6 +219,41 @@ async fn handle_request(state: AppState, req: Request) -> Result<Response<Body>,
     } else {
         response
     })
+}
+
+fn redirect_target_url(original_url: &str, query: &str) -> String {
+    let incoming: Vec<_> = form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key.starts_with("utm_"))
+        .collect();
+    if incoming.is_empty() {
+        return original_url.to_owned();
+    }
+
+    let (before_fragment, fragment) = original_url
+        .find('#')
+        .map_or((original_url, ""), |index| original_url.split_at(index));
+    let (base, existing_query) = before_fragment
+        .split_once('?')
+        .unwrap_or((before_fragment, ""));
+
+    // Preserve the original encoding of any parameters we keep.
+    let retained_query = existing_query
+        .split('&')
+        .filter(|pair| {
+            form_urlencoded::parse(pair.as_bytes())
+                .next()
+                .is_some_and(|(key, _)| {
+                    incoming
+                        .iter()
+                        .all(|(incoming_key, _)| *incoming_key != key)
+                })
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    let merged_query = form_urlencoded::Serializer::new(retained_query)
+        .extend_pairs(incoming)
+        .finish();
+    format!("{base}?{merged_query}{fragment}")
 }
 
 fn render_qr_code(url: &str) -> Response<Body> {
@@ -433,7 +474,7 @@ fn html_escape(s: &str) -> String {
 
 fn render_countdown_page(
     link: &domain::ShortLink,
-    _short_url: &str,
+    target_url: &str,
     delay_seconds: u32,
 ) -> Response<Body> {
     let created_at = http_common::system_time_to_rfc3339(link.created_at);
@@ -447,6 +488,11 @@ fn render_countdown_page(
     } else {
         String::new()
     };
+
+    // Escape '<' so the string cannot close the surrounding script element.
+    let url_js = serde_json::to_string(target_url)
+        .expect("redirect target serialization")
+        .replace('<', "\\u003c");
 
     let html = format!(
         r##"<!DOCTYPE html>
@@ -636,7 +682,7 @@ fn render_countdown_page(
     <script>
         let countdown = {delay};
         let cancelled = false;
-        const targetUrl = "{url_js}";
+        const targetUrl = {url_js};
 
         function updateCountdown() {{
             if (cancelled) return;
@@ -670,8 +716,7 @@ fn render_countdown_page(
         description_row = description_html,
         clicks = link.click_count,
         created = html_escape(&created_at),
-        url = html_escape(&link.original_url),
-        url_js = link.original_url.replace('\\', "\\\\").replace('"', "\\\""),
+        url = html_escape(target_url),
     );
 
     Response::builder()
@@ -683,3 +728,101 @@ fn render_countdown_page(
 
 // Note: Response builders (resp) and JSON helpers (json_err) are now provided
 // by the http-common crate.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::{adapters::memory_repo::InMemoryRepo, ShortLink, UserEmail};
+    use serde_json::json;
+    use std::time::UNIX_EPOCH;
+
+    async fn request_link(
+        original_url: &str,
+        delay: Option<u32>,
+        path: &str,
+        query: &str,
+    ) -> Response<Body> {
+        let repo = InMemoryRepo::new();
+        let mut link = ShortLink::new(
+            Slug::new("sample").unwrap(),
+            original_url.to_owned(),
+            UNIX_EPOCH,
+            UserEmail::new("owner@example.test").unwrap(),
+        );
+        link.redirect_delay = delay;
+        repo.put(link).unwrap();
+        let svc = LinkService::new(repo, Base62SlugGenerator::new(1), StdClock);
+
+        let event = json!({
+            "version": "2.0",
+            "rawPath": path,
+            "rawQueryString": query,
+            "requestContext": {
+                "stage": "$default",
+                "domainName": "short.example.test",
+                "http": { "method": "GET", "path": path }
+            },
+            "isBase64Encoded": false
+        });
+        let req = lambda_http::request::from_str(&event.to_string()).unwrap();
+        handle_request(&svc, req).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn redirect_location_forwards_only_utm_parameters() {
+        for (original, query, expected) in [
+            (
+                "https://example.test/destination#details",
+                "utm_source=newsletter&ignored=1&UTM_source=other",
+                "https://example.test/destination?utm_source=newsletter#details",
+            ),
+            (
+                "https://example.test/?keep=a%20b&%75tm_source=old&utm_source=older#details?tab=1",
+                "%75tm_source=one&utm_source=two&utm_campaign=board%26team%2Bone&keep=other",
+                "https://example.test/?keep=a%20b&utm_source=one&utm_source=two&utm_campaign=board%26team%2Bone#details?tab=1",
+            ),
+            (
+                "https://example.test/?utm_source=stored#details",
+                "ignored=1",
+                "https://example.test/?utm_source=stored#details",
+            ),
+        ] {
+            let response = request_link(original, None, "/sample", query).await;
+            assert_eq!(response.status(), 308);
+            assert_eq!(response.headers()["location"], expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn countdown_uses_the_same_target_for_the_link_and_script() {
+        let response = request_link(
+            "https://example.test/?keep=1&utm_source=old#details",
+            Some(1),
+            "/sample",
+            "utm_source=email%22%26%3C&ignored=1",
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        let Body::Text(html) = response.body() else {
+            panic!("expected HTML countdown response");
+        };
+        assert!(html.contains(
+            r#"href="https://example.test/?keep=1&amp;utm_source=email%22%26%3C#details" class="btn btn-primary" id="continue-btn""#
+        ));
+        assert!(html.contains(
+            r#"const targetUrl = "https://example.test/?keep=1&utm_source=email%22%26%3C#details";"#
+        ));
+    }
+
+    #[tokio::test]
+    async fn preview_and_qr_ignore_incoming_parameters() {
+        for path in ["/sample+", "/sample.qr", "/sample+.qr"] {
+            let original = "https://example.test/?utm_source=stored";
+            let baseline = request_link(original, Some(1), path, "").await;
+            let tagged = request_link(original, Some(1), path, "utm_source=incoming").await;
+            assert_eq!(tagged.status(), 200);
+            assert_eq!(tagged.headers(), baseline.headers());
+            assert_eq!(tagged.body().as_ref(), baseline.body().as_ref());
+        }
+    }
+}

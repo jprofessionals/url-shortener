@@ -6,7 +6,7 @@
   let apiBase;
   if (host === 'localhost' || host === '127.0.0.1') {
     apiBase = 'http://localhost:3001';
-  } else if (host === 'dev-admin-sc.jpro.dev') {
+  } else if (host === 'dev-admin-sc.jpro.dev' || host === 'dev.url-shortener-admin.pages.dev') {
     apiBase = 'https://dev-sc.jpro.dev';
   } else if (host === 'admin-sc.jpro.dev') {
     apiBase = 'https://sc.jpro.dev';

@@ -6,6 +6,15 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use std::time::SystemTime;
 
+/// Preserve the distinction between an omitted PATCH field and an explicit null.
+pub fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
+}
+
 // ============================================================================
 // JSON Response Helpers (framework-agnostic)
 // ============================================================================

@@ -408,7 +408,7 @@ struct UpdateLinkReq {
     activate_at: Option<Option<String>>,
     #[serde(default)]
     redirect_delay: Option<Option<u32>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "http_common::deserialize_patch_field")]
     group_id: Option<Option<String>>,
 }
 
@@ -587,6 +587,10 @@ async fn create_link(
             .into_response();
     }
 
+    if body.group_id.is_some() {
+        return group_assignment_unavailable();
+    }
+
     // Determine slug
     let slug = if let Some(alias) = &body.alias {
         if !http_common::is_valid_alias(alias) {
@@ -640,7 +644,6 @@ async fn create_link(
         .activate_at
         .and_then(|s| http_common::parse_rfc3339(&s).ok());
     link.redirect_delay = body.redirect_delay;
-    link.group_id = body.group_id;
 
     match state.repo.put(link.clone()) {
         Ok(()) => {
@@ -858,6 +861,17 @@ async fn preflight_link() -> impl IntoResponse {
     StatusCode::NO_CONTENT
 }
 
+fn group_assignment_unavailable() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(http_common::json_error_with_message(
+            "forbidden",
+            "group assignment requires the Lambda admin API",
+        )),
+    )
+        .into_response()
+}
+
 async fn update_link(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -977,6 +991,9 @@ async fn update_link(
         link.redirect_delay = delay;
     }
     if let Some(gid) = body.group_id {
+        if gid.is_some() && gid != link.group_id {
+            return group_assignment_unavailable();
+        }
         link.group_id = gid;
     }
     link.updated_at = Some(state.clock.now());
