@@ -64,7 +64,7 @@ function formatExpiry(isoString) {
   if (!isoString) return '-';
   const d = new Date(isoString);
   const now = new Date();
-  if (d < now) return `<span style="color:red;">Expired</span>`;
+  if (d < now) return 'Expired';
   const diff = d - now;
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   if (days <= 0) {
@@ -115,6 +115,7 @@ async function loadLinks() {
   if (r.body?.user) {
     currentUser = r.body.user;
     updateUserDisplay();
+    populateGroupDropdowns();
   }
 
   // Detect if backend supports new features
@@ -142,46 +143,86 @@ async function loadLinks() {
 
   for (const l of links) {
     const tr = document.createElement('tr');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'link-select';
+    checkbox.dataset.slug = l.slug;
+    tr.insertCell().append(checkbox);
+
+    const slug = addCell(tr, l.slug + (hasNewFeatures && l.description ? ' *' : ''));
+    const shortUrl = addCell(tr, l.short_url);
+    const shortUrlHref = httpUrl(l.short_url);
+    if (shortUrlHref) {
+      const anchor = document.createElement('a');
+      anchor.href = shortUrlHref;
+      anchor.target = '_blank';
+      anchor.rel = 'noreferrer';
+      anchor.textContent = l.short_url;
+      const copy = actionButton('📋', () => copyToClipboard(l.short_url, copy));
+      copy.className = 'copy-btn';
+      copy.title = 'Copy';
+      shortUrl.replaceChildren(anchor, ' ', copy);
+    }
+
+    const original = addCell(tr, l.original_url);
     if (hasNewFeatures) {
-      const statusBadge = l.is_active
-        ? '<span style="color:green;">Active</span>'
-        : '<span style="color:red;">Inactive</span>';
-      const expiresDisplay = l.expires_at
-        ? `<span title="${l.expires_at}">${formatExpiry(l.expires_at)}</span>`
-        : '-';
-      const descTitle = l.description ? ` title="${l.description.replace(/"/g, '&quot;')}"` : '';
-      const groupName = l.group_id ? (allGroups.find(g => g.id === l.group_id)?.name || l.group_id) : '-';
-      tr.innerHTML = `
-        <td><input type="checkbox" class="link-select" data-slug="${l.slug}" /></td>
-        <td${descTitle}>${l.slug}${l.description ? ' *' : ''}</td>
-        <td><a href="${l.short_url}" target="_blank" rel="noreferrer">${l.short_url}</a> <button class="copy-btn" onclick="copyToClipboard('${l.short_url}', this)" title="Copy">📋</button></td>
-        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${l.original_url}">${l.original_url}</td>
-        <td>${l.click_count}</td>
-        <td>${statusBadge}</td>
-        <td>${groupName}</td>
-        <td>${expiresDisplay}</td>
-        <td>${new Date(l.created_at).toLocaleDateString()}</td>
-        <td>${l.created_by}</td>
-        <td>
-          <button onclick="openEditModal('${l.slug}')">Edit</button>
-          <button onclick="toggleLink('${l.slug}', ${l.is_active})">${l.is_active ? 'Off' : 'On'}</button>
-          <button onclick="showQrCode('${l.slug}', '${l.short_url}')">QR</button>
-        </td>
-      `;
-    } else {
-      tr.innerHTML = `
-        <td><input type="checkbox" class="link-select" data-slug="${l.slug}" /></td>
-        <td>${l.slug}</td>
-        <td><a href="${l.short_url}" target="_blank" rel="noreferrer">${l.short_url}</a> <button class="copy-btn" onclick="copyToClipboard('${l.short_url}', this)" title="Copy">📋</button></td>
-        <td>${l.original_url}</td>
-        <td>${l.created_at}</td>
-        <td>${l.created_by}</td>
-      `;
+      if (l.description) slug.title = l.description;
+      original.style.cssText = 'max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      original.title = l.original_url;
+      addCell(tr, l.click_count);
+      addCell(tr, l.is_active ? 'Active' : 'Inactive').style.color = l.is_active ? 'green' : 'red';
+      addCell(tr, l.group_id ? (allGroups.find(g => g.id === l.group_id)?.name || l.group_id) : '-');
+      const expiry = addCell(tr, formatExpiry(l.expires_at));
+      if (l.expires_at) expiry.title = l.expires_at;
+      if (expiry.textContent === 'Expired') expiry.style.color = 'red';
+    }
+    addCell(tr, hasNewFeatures ? new Date(l.created_at).toLocaleDateString() : l.created_at);
+    addCell(tr, l.created_by);
+
+    if (hasNewFeatures) {
+      const actions = tr.insertCell();
+      actions.append(
+        actionButton('Edit', () => openEditModal(l.slug)),
+        actionButton(l.is_active ? 'Off' : 'On', () => toggleLink(l.slug, l.is_active))
+      );
+      if (shortUrlHref) actions.append(actionButton('QR', () => showQrCode(l.slug, shortUrlHref)));
     }
     out.appendChild(tr);
   }
 
   updateSelectedCount();
+}
+
+function addCell(row, text) {
+  const cell = row.insertCell();
+  cell.textContent = text;
+  return cell;
+}
+
+function actionButton(label, handler) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.addEventListener('click', handler);
+  return button;
+}
+
+function httpUrl(value) {
+  try {
+    const url = new URL(value, window.location.href);
+    if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function roleBadge(role, label = role) {
+  const badge = document.createElement('span');
+  badge.style.cssText = 'color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;';
+  badge.style.backgroundColor = role === 'admin' ? '#4CAF50' : role === 'editor' ? '#2196F3' : '#9e9e9e';
+  badge.textContent = label;
+  return badge;
 }
 
 function updatePagination() {
@@ -213,8 +254,10 @@ function updatePagination() {
 function updateUserDisplay() {
   const userEl = document.getElementById('userInfo');
   if (userEl && currentUser) {
-    const adminBadge = currentUser.is_admin ? ' <span style="background:#4CAF50;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">Admin</span>' : '';
-    userEl.innerHTML = `Logged in as: <strong>${currentUser.email}</strong>${adminBadge}`;
+    const email = document.createElement('strong');
+    email.textContent = currentUser.email;
+    userEl.replaceChildren('Logged in as: ', email);
+    if (currentUser.is_admin) userEl.append(' ', roleBadge('admin', 'Admin'));
   }
 }
 
@@ -265,7 +308,9 @@ function openEditModal(slug) {
   document.getElementById('editExpires').value = isoToLocal(link.expires_at);
   document.getElementById('editActivateAt').value = isoToLocal(link.activate_at);
   document.getElementById('editRedirectDelay').value = link.redirect_delay || '';
-  document.getElementById('editGroup').value = link.group_id || '';
+  const editGroup = document.getElementById('editGroup');
+  editGroup.dataset.assignedGroup = link.group_id || '';
+  populateGroupDropdown('editGroup', link.group_id || '');
 
   document.getElementById('editModal').style.display = 'block';
   document.getElementById('editModal').dataset.slug = slug;
@@ -388,6 +433,8 @@ async function bulkDeactivate() {
 // QR Code modal functions
 let currentQrSlug = '';
 let currentQrBaseUrl = '';
+let qrRequest;
+let qrImageUrl;
 
 function showQrCode(slug, shortUrl) {
   currentQrSlug = slug;
@@ -406,44 +453,51 @@ function showQrCode(slug, shortUrl) {
   loadQrCode();
 }
 
-function loadQrCode() {
+function clearQrImage() {
+  qrRequest?.abort();
+  if (qrImageUrl) URL.revokeObjectURL(qrImageUrl);
+  qrImageUrl = undefined;
+  const downloadLink = document.getElementById('qrDownload');
+  downloadLink.removeAttribute('href');
+  downloadLink.style.display = 'none';
+}
+
+async function loadQrCode() {
+  clearQrImage();
+  const request = new AbortController();
+  qrRequest = request;
   const container = document.getElementById('qrContainer');
   const downloadLink = document.getElementById('qrDownload');
   const urlDisplay = document.getElementById('qrUrlDisplay');
   const mode = document.getElementById('qrMode').value;
-
-  // Build the URL with the selected suffix
   const targetUrl = `${currentQrBaseUrl}${mode}`;
-  const qrUrl = `${targetUrl}.qr`;
 
-  container.innerHTML = '<p>Loading QR code...</p>';
+  container.textContent = 'Loading QR code...';
   urlDisplay.textContent = `URL: ${targetUrl}`;
 
-  fetch(qrUrl)
-    .then(res => {
-      if (!res.ok) throw new Error('Failed to load QR code');
-      return res.text();
-    })
-    .then(svg => {
-      container.innerHTML = svg;
-      const svgEl = container.querySelector('svg');
-      if (svgEl) {
-        svgEl.style.width = '200px';
-        svgEl.style.height = '200px';
-      }
-      const blob = new Blob([svg], { type: 'image/svg+xml' });
-      downloadLink.href = URL.createObjectURL(blob);
-      const suffix = mode ? `-${mode.replace('+', 'preview')}` : '';
-      downloadLink.download = `${currentQrSlug}${suffix}-qr.svg`;
-      downloadLink.style.display = 'inline-block';
-    })
-    .catch(err => {
-      container.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
-      downloadLink.style.display = 'none';
-    });
+  try {
+    const response = await fetch(`${targetUrl}.qr`, { signal: request.signal });
+    if (!response.ok) throw new Error('Failed to load QR code');
+    const svg = await response.text();
+    if (request.signal.aborted) return;
+    qrImageUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    const image = document.createElement('img');
+    image.src = qrImageUrl;
+    image.width = 200;
+    image.height = 200;
+    image.alt = 'QR code';
+    container.replaceChildren(image);
+    downloadLink.href = qrImageUrl;
+    const suffix = mode ? `-${mode.replace('+', 'preview')}` : '';
+    downloadLink.download = `${currentQrSlug}${suffix}-qr.svg`;
+    downloadLink.style.display = 'inline-block';
+  } catch (error) {
+    if (!request.signal.aborted) container.textContent = `Error: ${error.message}`;
+  }
 }
 
 function closeQrModal() {
+  clearQrImage();
   document.getElementById('qrModal').style.display = 'none';
   currentQrSlug = '';
   currentQrBaseUrl = '';
@@ -471,12 +525,6 @@ async function copyToClipboard(text, btn) {
   }
 }
 
-// Make functions available globally for onclick handlers
-window.openEditModal = openEditModal;
-window.toggleLink = toggleLink;
-window.showQrCode = showQrCode;
-window.copyToClipboard = copyToClipboard;
-
 // ============================================================================
 // Group Management
 // ============================================================================
@@ -486,22 +534,26 @@ let currentGroupId = null;
 
 // Populate all group dropdowns with current groups
 function populateGroupDropdowns() {
-  const dropdowns = ['createGroup', 'editGroup', 'filterByGroup'];
-  for (const id of dropdowns) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    const currentValue = el.value;
-    el.innerHTML = id === 'filterByGroup'
-      ? '<option value="">All groups</option>'
-      : '<option value="">No group</option>';
-    for (const g of allGroups) {
-      const opt = document.createElement('option');
-      opt.value = g.id;
-      opt.textContent = g.name;
-      el.appendChild(opt);
-    }
-    el.value = currentValue;
+  for (const id of ['createGroup', 'editGroup', 'filterByGroup']) {
+    populateGroupDropdown(id, document.getElementById(id).value);
   }
+}
+
+function populateGroupDropdown(id, value) {
+  const el = document.getElementById(id);
+  const isFilter = id === 'filterByGroup';
+  const assignedGroup = el.dataset.assignedGroup;
+  el.replaceChildren(new Option(isFilter ? 'All groups' : 'No group', ''));
+  for (const group of allGroups) {
+    const canAssign = currentUser?.is_admin || group.role === 'admin' || group.role === 'editor';
+    if (isFilter || canAssign || group.id === assignedGroup) {
+      el.append(new Option(group.name, group.id));
+    }
+  }
+  if (assignedGroup && !allGroups.some(group => group.id === assignedGroup)) {
+    el.append(new Option(assignedGroup, assignedGroup));
+  }
+  el.value = value;
 }
 
 async function loadGroups() {
@@ -525,21 +577,20 @@ async function loadGroups() {
 
   for (const g of allGroups) {
     const tr = document.createElement('tr');
-    const roleBadge = g.role
-      ? `<span style="background:${g.role === 'admin' ? '#4CAF50' : g.role === 'editor' ? '#2196F3' : '#9e9e9e'};color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">${g.role}</span>`
-      : '';
-    const canManage = g.role === 'admin' || currentUser?.is_admin;
-    tr.innerHTML = `
-      <td><strong>${g.name}</strong></td>
-      <td class="muted">${g.description || '-'}</td>
-      <td>${roleBadge}</td>
-      <td>${new Date(g.created_at).toLocaleDateString()}</td>
-      <td>
-        <button onclick="openMembersModal('${g.id}', '${g.name.replace(/'/g, "\\'")}')">Members</button>
-        ${canManage ? `<button onclick="openGroupEditModal('${g.id}')">Edit</button>` : ''}
-        ${canManage ? `<button onclick="deleteGroup('${g.id}')" style="color:#dc3545;">Delete</button>` : ''}
-      </td>
-    `;
+    const name = document.createElement('strong');
+    name.textContent = g.name;
+    tr.insertCell().append(name);
+    addCell(tr, g.description || '-').className = 'muted';
+    const role = tr.insertCell();
+    if (g.role) role.append(roleBadge(g.role));
+    addCell(tr, new Date(g.created_at).toLocaleDateString());
+    const actions = tr.insertCell();
+    actions.append(actionButton('Members', () => openMembersModal(g.id, g.name)));
+    if (g.role === 'admin' || currentUser?.is_admin) {
+      const remove = actionButton('Delete', () => deleteGroup(g.id));
+      remove.style.color = '#dc3545';
+      actions.append(actionButton('Edit', () => openGroupEditModal(g.id)), remove);
+    }
     out.appendChild(tr);
   }
 }
@@ -652,15 +703,15 @@ async function loadMembers() {
 
   for (const m of members) {
     const tr = document.createElement('tr');
-    const roleBadge = `<span style="background:${m.role === 'admin' ? '#4CAF50' : m.role === 'editor' ? '#2196F3' : '#9e9e9e'};color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">${m.role}</span>`;
-    tr.innerHTML = `
-      <td>${m.email}</td>
-      <td>${roleBadge}</td>
-      <td>${new Date(m.added_at).toLocaleDateString()}</td>
-      <td>
-        ${canManage ? `<button onclick="removeMember('${encodeURIComponent(m.email)}')" style="color:#dc3545;">Remove</button>` : ''}
-      </td>
-    `;
+    addCell(tr, m.email);
+    tr.insertCell().append(roleBadge(m.role));
+    addCell(tr, new Date(m.added_at).toLocaleDateString());
+    const actions = tr.insertCell();
+    if (canManage) {
+      const remove = actionButton('Remove', () => removeMember(encodeURIComponent(m.email)));
+      remove.style.color = '#dc3545';
+      actions.append(remove);
+    }
     out.appendChild(tr);
   }
 }
@@ -699,12 +750,6 @@ async function removeMember(encodedEmail) {
     alert(`Error ${r.status}: ${(r.body?.error?.message) || 'failed'}`);
   }
 }
-
-// Make group functions globally available
-window.openGroupEditModal = openGroupEditModal;
-window.deleteGroup = deleteGroup;
-window.openMembersModal = openMembersModal;
-window.removeMember = removeMember;
 
 async function createLink() {
   const original_url = document.getElementById('orig').value.trim();

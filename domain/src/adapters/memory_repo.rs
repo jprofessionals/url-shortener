@@ -208,7 +208,7 @@ impl LinkRepository for InMemoryRepo {
             .collect();
 
         // Sort by created_at desc
-        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items.sort_by_key(|item| std::cmp::Reverse(item.created_at));
 
         let total = items.len();
         let has_more = options.offset + options.limit < total;
@@ -510,7 +510,7 @@ impl ClickRepository for InMemoryClickRepo {
             .filter(|c| c.slug.as_str() == slug.as_str())
             .cloned()
             .collect();
-        matching.sort_by(|a, b| b.clicked_at.cmp(&a.clicked_at));
+        matching.sort_by_key(|item| std::cmp::Reverse(item.clicked_at));
         Ok(matching.into_iter().take(limit).collect())
     }
 
@@ -602,7 +602,7 @@ impl AuditRepository for InMemoryAuditRepo {
             .filter(|e| e.target_type == target_type && e.target_id == target_id)
             .cloned()
             .collect();
-        matching.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        matching.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         Ok(matching.into_iter().take(limit).collect())
     }
 
@@ -620,7 +620,7 @@ impl AuditRepository for InMemoryAuditRepo {
             .filter(|e| e.actor_email.as_str() == actor_email.as_str())
             .cloned()
             .collect();
-        matching.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        matching.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         Ok(matching.into_iter().take(limit).collect())
     }
 
@@ -630,7 +630,7 @@ impl AuditRepository for InMemoryAuditRepo {
             .lock()
             .map_err(|_| CoreError::Repository("mutex poisoned".into()))?;
         let mut all: Vec<_> = entries.iter().cloned().collect();
-        all.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        all.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         Ok(all.into_iter().take(limit).collect())
     }
 }

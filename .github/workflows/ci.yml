@@ -30,6 +30,14 @@ jobs:
       - name: test
         run: cargo test --workspace --all-features -- --nocapture
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Test admin frontend
+        run: node --test tests/admin-frontend.test.cjs
+
       - name: Install cargo-lambda
         run: pip install cargo-lambda
 

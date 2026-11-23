@@ -77,7 +77,7 @@ struct UpdateLinkReq {
     activate_at: Option<Option<String>>,
     #[serde(default)]
     redirect_delay: Option<Option<u32>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "http_common::deserialize_patch_field")]
     group_id: Option<Option<String>>,
 }
 
@@ -474,6 +474,15 @@ async fn create_link(state: AppState, req: Request) -> Result<Response<Body>, Er
         )));
     }
 
+    if let Some(response) = destination_group_error(
+        &state.repo,
+        payload.group_id.as_deref(),
+        &user_email,
+        is_admin(user_email.as_str()),
+    ) {
+        return Ok(response);
+    }
+
     // Prepare created_at
     let created_at = state.clock.now();
 
@@ -573,6 +582,16 @@ async fn update_link(
     };
 
     let user_is_admin = is_admin(&verified.email);
+    let user_email = match UserEmail::new(verified.email.clone()) {
+        Ok(email) => email,
+        Err(_) => {
+            return Ok(with_cors(resp_with_error(
+                401,
+                "unauthorized",
+                "invalid user email in token",
+            )));
+        }
+    };
 
     // Parse slug
     let slug = match Slug::new(slug_str.clone()) {
@@ -633,7 +652,6 @@ async fn update_link(
     // - Group editors/admins can edit links in their group
     if !user_is_admin && link.created_by.as_str() != verified.email {
         // Check if link belongs to a group and user has edit access
-        let user_email = UserEmail::new(verified.email.clone()).unwrap();
         let can_edit_via_group = if let Some(ref gid) = link.group_id {
             match state.repo.get_member(gid, &user_email) {
                 Ok(Some(member)) => member.role.can_edit(),
@@ -693,6 +711,13 @@ async fn update_link(
         link.redirect_delay = delay;
     }
     if let Some(gid) = payload.group_id {
+        if gid != link.group_id {
+            if let Some(response) =
+                destination_group_error(&state.repo, gid.as_deref(), &user_email, user_is_admin)
+            {
+                return Ok(response);
+            }
+        }
         link.group_id = gid;
     }
     link.updated_at = Some(state.clock.now());
@@ -716,6 +741,26 @@ async fn update_link(
         Err(e) => {
             error!(err=?e, "update error");
             Ok(with_cors(resp_with_error(500, "internal", "server error")))
+        }
+    }
+}
+
+fn destination_group_error(
+    repo: &impl GroupRepository,
+    group_id: Option<&str>,
+    user_email: &UserEmail,
+    user_is_admin: bool,
+) -> Option<Response<Body>> {
+    match domain::can_assign_link_group(repo, group_id, user_email, user_is_admin) {
+        Ok(true) => None,
+        Ok(false) => Some(with_cors(resp_with_error(
+            403,
+            "forbidden",
+            "destination group requires editor access",
+        ))),
+        Err(e) => {
+            error!(err=?e, "destination group lookup failed");
+            Some(with_cors(resp_with_error(500, "internal", "server error")))
         }
     }
 }
@@ -1885,6 +1930,72 @@ async fn verify_request_user(req: &Request) -> Result<VerifiedUser, AuthHttp> {
         Err(e) => {
             warn!(err=?e, "auth failed");
             Err(AuthHttp::Unauthorized)
+        }
+    }
+}
+
+#[cfg(test)]
+mod group_assignment_tests {
+    use super::*;
+    use domain::adapters::memory_repo::InMemoryGroupRepo;
+    use std::time::SystemTime;
+
+    #[test]
+    fn destination_requires_edit_access_or_system_admin() {
+        let repo = InMemoryGroupRepo::new();
+        let admin = UserEmail::new("admin@example.test").unwrap();
+        let editor = UserEmail::new("editor@example.test").unwrap();
+        let member = UserEmail::new("viewer@example.test").unwrap();
+        let outsider = UserEmail::new("outsider@example.test").unwrap();
+        let group_id = "team";
+        let now = SystemTime::now();
+        repo.create_group(LinkGroup {
+            id: group_id.into(),
+            name: "Test team".into(),
+            description: None,
+            created_at: now,
+            created_by: admin.clone(),
+        })
+        .unwrap();
+        for (user, role) in [(&editor, GroupRole::Editor), (&member, GroupRole::Viewer)] {
+            repo.add_member(GroupMember {
+                group_id: group_id.into(),
+                user_email: user.clone(),
+                role,
+                added_at: now,
+                added_by: admin.clone(),
+            })
+            .unwrap();
+        }
+
+        for user in [&member, &outsider] {
+            let response = destination_group_error(&repo, Some(group_id), user, false).unwrap();
+            assert_eq!(response.status(), 403);
+        }
+        assert!(destination_group_error(&repo, Some(group_id), &editor, false).is_none());
+        assert!(destination_group_error(&repo, Some(group_id), &admin, true).is_none());
+        assert!(destination_group_error(&repo, None, &outsider, false).is_none());
+        assert_eq!(
+            destination_group_error(&repo, Some("missing"), &admin, true)
+                .unwrap()
+                .status(),
+            403
+        );
+    }
+
+    #[test]
+    fn group_patch_preserves_omitted_field_and_can_clear_assignment() {
+        for (body, expected) in [
+            (r#"{}"#, None),
+            (r#"{"group_id":null}"#, Some(None)),
+            (r#"{"group_id":"team"}"#, Some(Some("team".to_string()))),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<UpdateLinkReq>(body)
+                    .unwrap()
+                    .group_id,
+                expected
+            );
         }
     }
 }

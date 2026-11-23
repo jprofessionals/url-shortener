@@ -337,6 +337,29 @@ pub trait GroupRepository: Send + Sync {
     ) -> Result<Vec<(LinkGroup, GroupRole)>, CoreError>;
 }
 
+/// An assignment requires an existing group and editor access to that group.
+pub fn can_assign_link_group(
+    repo: &impl GroupRepository,
+    group_id: Option<&str>,
+    user_email: &UserEmail,
+    user_is_admin: bool,
+) -> Result<bool, CoreError> {
+    let Some(group_id) = group_id else {
+        return Ok(true);
+    };
+    if group_id.is_empty() {
+        return Ok(false);
+    }
+    if !user_is_admin
+        && !repo
+            .get_member(group_id, user_email)?
+            .is_some_and(|member| member.role.can_edit())
+    {
+        return Ok(false);
+    }
+    Ok(repo.get_group(group_id)?.is_some())
+}
+
 /// Repository port for click analytics.
 pub trait ClickRepository: Send + Sync {
     fn record_click(&self, event: ClickEvent) -> Result<(), CoreError>;

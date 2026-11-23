@@ -487,7 +487,7 @@ impl LinkRepository for DynamoRepo {
             .collect();
 
         // Sort by created_at desc
-        all_items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        all_items.sort_by_key(|item| std::cmp::Reverse(item.created_at));
 
         let total = all_items.len();
         let has_more = options.offset + options.limit < total;
@@ -1388,7 +1388,7 @@ impl AuditRepository for DynamoRepo {
             .iter()
             .filter_map(|it| item_to_audit(it).ok())
             .collect();
-        res.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        res.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         res.truncate(limit);
         Ok(res)
     }
@@ -1417,7 +1417,7 @@ impl AuditRepository for DynamoRepo {
             .iter()
             .filter_map(|it| item_to_audit(it).ok())
             .collect();
-        res.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        res.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         res.truncate(limit);
         Ok(res)
     }
@@ -1431,7 +1431,7 @@ impl AuditRepository for DynamoRepo {
             .iter()
             .filter_map(|it| item_to_audit(it).ok())
             .collect();
-        res.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        res.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
         res.truncate(limit);
         Ok(res)
     }
