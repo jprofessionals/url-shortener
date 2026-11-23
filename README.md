@@ -34,7 +34,9 @@ The UI selects `http://localhost:3001` as the API for localhost. Restore
 
 With the API running in debug mode, run these commands in a second terminal.
 The create request should return `201`. The list should contain the new alias.
-The last request should return `308` with `Location: https://example.com`.
+The last request should return `307` with `Location: https://example.com` and
+`Cache-Control: no-store`. Browsers can retain permanent redirects cached from
+older releases.
 
 ```bash
 api=http://localhost:3001

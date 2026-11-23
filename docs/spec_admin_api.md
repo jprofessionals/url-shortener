@@ -119,7 +119,7 @@ Status mapping:
 - 500 Internal Server Error → `internal` (unexpected server failure).
 
 #### 7. Redirect status (reference)
-- Public redirect endpoint MUST use `308 Permanent Redirect` for consistency and method safety.
+- Public redirects use `307 Temporary Redirect` with `Cache-Control: no-store` so recipients' next requests reflect link edits, deactivation and expiry.
 
 #### 8. Security notes
 - Always prefer explicit origins for CORS in production; avoid `*` when feasible.
