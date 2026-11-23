@@ -377,6 +377,12 @@ and grant the deploy role `iam:PassRole` only for that role. The execution role
 needs the resource permissions used by the SAM template for its stage. SAM's
 managed bucket and stack must already be bootstrapped for narrowly scoped roles.
 
+The current roles deploy code and configuration to the two existing Lambda
+functions in their environment. They can pass the existing Lambda runtime roles
+through CloudFormation. They have no direct DynamoDB data access. Have an AWS
+operator review template changes that add resources or change runtime IAM
+policies before deploying them.
+
 Use the environment secret `ADMIN_EMAILS` for administrator addresses.
 Verify OIDC in dev and then prod before removing the legacy
 `AWS_ACCESS_KEY_ID` repository variable and `AWS_SECRET_ACCESS_KEY` secret.
