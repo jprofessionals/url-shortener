@@ -9,10 +9,7 @@
 //! - Initialize structured logging compatible with Lambda.
 //!
 //! Security
-//! - Auth is performed by verifying a Google ID token via `google_auth::verify`.
-//! - If `GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE` is set to a truthy value, the
-//!   adapter will run without signature verification; this process emits a WARN
-//!   at startup reminding not to use this mode in production.
+//! - Auth is performed by verifying a Google ID token via `google_auth::verify_async`.
 //!
 //! Authorization
 //! - Regular users can only see/edit their own links.
@@ -230,7 +227,6 @@ fn link_to_out(link: domain::ShortLink, host: &str) -> LinkOut {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     init_tracing();
-    warn_if_insecure_skip_sig();
 
     let repo = DynamoRepo::from_env().map_err(|e| format!("dynamo init error: {e}"))?;
     let state = AppState {
@@ -253,17 +249,6 @@ fn init_tracing() {
         .with(env_filter)
         .with(fmt::layer().with_target(true).with_writer(std::io::stdout))
         .init();
-}
-
-fn warn_if_insecure_skip_sig() {
-    let val = std::env::var("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE").unwrap_or_default();
-    if matches_ignore_case(&val, &["1", "true", "yes"]) {
-        warn!("ID token signature verification is DISABLED (GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE=1). DO NOT USE IN PRODUCTION.");
-    }
-}
-
-fn matches_ignore_case(s: &str, any: &[&str]) -> bool {
-    any.iter().any(|t| s.eq_ignore_ascii_case(t))
 }
 
 /// Check if the given email is in the ADMIN_EMAILS list.

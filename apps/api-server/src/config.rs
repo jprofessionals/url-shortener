@@ -95,8 +95,6 @@ pub struct Config {
     pub allowed_domain: Option<String>,
     /// Google OAuth client ID (required for Google auth)
     pub google_oauth_client_id: Option<String>,
-    /// Whether to skip Google signature verification (dev only)
-    pub insecure_skip_signature: bool,
     /// CORS allow origin
     pub cors_allow_origin: HeaderValue,
     /// Storage provider
@@ -147,11 +145,6 @@ impl Config {
             }
         }
 
-        // Insecure skip signature
-        let skip_sig = env::var("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE").unwrap_or_default();
-        let insecure_skip_signature =
-            matches!(skip_sig.to_lowercase().as_str(), "1" | "true" | "yes");
-
         // CORS allow origin
         let cors_origin_str = env::var("CORS_ALLOW_ORIGIN").unwrap_or_else(|_| "*".into());
         let cors_allow_origin = if cors_origin_str == "*" {
@@ -183,7 +176,6 @@ impl Config {
             auth_provider,
             allowed_domain,
             google_oauth_client_id,
-            insecure_skip_signature,
             cors_allow_origin,
             storage_provider,
             db_path,
@@ -205,12 +197,6 @@ impl Config {
                      Set ALLOWED_DOMAIN for domain restriction."
                 );
             }
-        }
-        if self.insecure_skip_signature {
-            tracing::warn!(
-                "GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE is set: ID token signature verification \
-                 is DISABLED. DO NOT USE IN PRODUCTION."
-            );
         }
     }
 }

@@ -494,7 +494,7 @@ async fn get_slug(State(state): State<AppState>, Path(slug): Path<String>) -> im
     match Slug::new(slug.clone()) {
         Ok(s) => match state.repo.get(&s) {
             Ok(Some(link)) => {
-                info!(slug = %s.as_str(), redirect_to = %link.original_url, "resolve ok");
+                info!(slug = %s.as_str(), "resolve ok");
                 Redirect::permanent(&link.original_url).into_response()
             }
             Ok(None) => {

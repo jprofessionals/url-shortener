@@ -196,7 +196,7 @@ async fn handle_request(
                         if let Err(e) = svc.increment_click(&slug) {
                             warn!(slug = %slug.as_str(), err = ?e, "click increment failed");
                         }
-                        info!(slug = %slug.as_str(), redirect_to = %link.original_url, "resolve ok");
+                        info!(slug = %slug.as_str(), "resolve ok");
                         let target_url = redirect_target_url(&link.original_url, query);
                         resp(308, Some(("Location", target_url)), None)
                     }
@@ -432,10 +432,6 @@ fn render_preview_page(link: &domain::ShortLink, _short_url: &str) -> Response<B
                 </tr>
                 {updated_row}
                 {expires_row}
-                <tr>
-                    <td>Created By</td>
-                    <td>{created_by}</td>
-                </tr>
             </table>
             <div class="destination">
                 <div class="destination-label">Destination URL</div>
@@ -453,7 +449,6 @@ fn render_preview_page(link: &domain::ShortLink, _short_url: &str) -> Response<B
         created = html_escape(&created_at),
         updated_row = updated_html,
         expires_row = expires_html,
-        created_by = html_escape(link.created_by.as_str()),
         url = html_escape(&link.original_url),
     );
 
@@ -812,6 +807,18 @@ mod tests {
         assert!(html.contains(
             r#"const targetUrl = "https://example.test/?keep=1&utm_source=email%22%26%3C#details";"#
         ));
+    }
+
+    #[tokio::test]
+    async fn public_preview_hides_owner_email() {
+        let target = "https://example.test/destination";
+        let response = request_link(target, None, "/sample+", "").await;
+        assert_eq!(response.status(), 200);
+        let Body::Text(html) = response.body() else {
+            panic!("expected HTML preview response");
+        };
+        assert!(html.contains(&format!(r#"href="{target}""#)));
+        assert!(!html.contains("owner@example.test"));
     }
 
     #[tokio::test]

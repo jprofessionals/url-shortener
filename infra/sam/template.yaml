@@ -414,7 +414,6 @@ Resources:
           # SECURITY NOTE:
           # Do not set "skip signature verification" flags in production.
           # If your code supports a dev-only bypass, prefer gating it via StageName == dev.
-          GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE: ''
 
   # Custom domain for the API (optional - only created if CustomDomainName is provided)
   ApiCustomDomain:
