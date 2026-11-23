@@ -20,7 +20,7 @@ on:
 jobs:
   deploy-dev:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.environment == 'dev')
     environment: dev
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +35,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy admin-frontend --project-name=${{ vars.PAGES_PROJECT_NAME }}
+          command: pages deploy admin-frontend --branch=dev --project-name=${{ vars.PAGES_PROJECT_NAME }}
 
   deploy-prod:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'
     environment: prod
     steps:
       - uses: actions/checkout@v4
@@ -54,4 +54,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy admin-frontend --project-name=${{ vars.PAGES_PROJECT_NAME }}
+          command: pages deploy admin-frontend --branch=main --project-name=${{ vars.PAGES_PROJECT_NAME }}
