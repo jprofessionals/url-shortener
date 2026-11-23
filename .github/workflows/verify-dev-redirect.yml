@@ -1,0 +1,48 @@
+name: Verify Dev Redirect
+
+on:
+  workflow_dispatch:
+    inputs:
+      redirect_status:
+        description: 'Expected status for an ordinary redirect'
+        required: true
+        default: '307'
+        type: choice
+        options: ['307', '308']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assume the dev verification role
+        if: vars.AWS_DEV_VERIFY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_VERIFY_ROLE_ARN }}
+          aws-region: eu-north-1
+
+      - name: Use existing AWS credentials during OIDC migration
+        if: vars.AWS_DEV_VERIFY_ROLE_ARN == '' && vars.AWS_DEPLOY_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Verify redirects with synthetic dev links
+        env:
+          AWS_REGION: eu-north-1
+          EXPECTED_REDIRECT_STATUS: ${{ inputs.redirect_status }}
+        run: bash .github/scripts/verify-dev-redirect.sh "$EXPECTED_REDIRECT_STATUS"
