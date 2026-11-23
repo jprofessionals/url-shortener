@@ -35,6 +35,7 @@ Parameters:
   # Comma-separated list of admin emails (can see/edit all links)
   AdminEmails:
     Type: String
+    NoEcho: true
     Default: ''
     Description: Comma-separated list of admin emails (e.g., admin@company.com,ops@company.com)
 
@@ -410,10 +411,6 @@ Resources:
 
           # Admin authorization (comma-separated emails)
           ADMIN_EMAILS: !Ref AdminEmails
-
-          # SECURITY NOTE:
-          # Do not set "skip signature verification" flags in production.
-          # If your code supports a dev-only bypass, prefer gating it via StageName == dev.
 
   # Custom domain for the API (optional - only created if CustomDomainName is provided)
   ApiCustomDomain:

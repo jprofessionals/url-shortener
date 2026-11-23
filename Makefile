@@ -45,9 +45,9 @@ build-lambdas:
 	@set -e; \
 	mkdir -p $(ART)/lambda-redirect $(ART)/lambda-admin; \
 	if [ "$(ARM)" = "1" ]; then \
-		cargo lambda build --release --arm64 -p lambda-redirect -p lambda-admin; \
+		cargo lambda build --locked --release --arm64 -p lambda-redirect -p lambda-admin; \
 	else \
-		cargo lambda build --release -p lambda-redirect -p lambda-admin; \
+		cargo lambda build --locked --release -p lambda-redirect -p lambda-admin; \
 	fi; \
 	cp target/lambda/lambda-redirect/bootstrap $(ART)/lambda-redirect/bootstrap; \
 	cp target/lambda/lambda-admin/bootstrap $(ART)/lambda-admin/bootstrap; \
@@ -106,15 +106,22 @@ deploy-prod: build-lambdas iac-validate
 	cd infra/sam && sam deploy --config-env prod --no-confirm-changeset
 
 ## Deploy frontend (Cloudflare Pages)
-## Single deployment serves both dev and prod via custom domains:
-##   - dev-admin-sc.jpro.dev → uses dev backend
-##   - admin-sc.jpro.dev → uses prod backend
-## Frontend auto-detects environment from hostname
+## Use PAGES_BRANCH=dev to deploy a preview.
+PAGES_BRANCH ?= main
+
 deploy-frontend:
 	@echo "Deploying frontend (Cloudflare Pages)..."
-	cd admin-frontend && npx wrangler pages deploy . --project-name=url-shortener-admin
+	@set -e; \
+	cd admin-frontend; \
+	npm ci --ignore-scripts; \
+	publish_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$publish_dir"' EXIT; \
+	cp app.js config.js index.html "$$publish_dir/"; \
+	./node_modules/.bin/wrangler pages deploy "$$publish_dir" \
+		--project-name=url-shortener-admin --branch="$(PAGES_BRANCH)"
 
 ## Full deploy to dev (backend + frontend)
+deploy-all-dev: PAGES_BRANCH = dev
 deploy-all-dev: deploy-dev deploy-frontend
 	@echo "DEV deployment complete!"
 

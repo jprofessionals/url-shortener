@@ -105,11 +105,14 @@ with all features and a Lambda artifact build.
 
 ## Deployment
 
-[Deploy AWS Lambdas](.github/workflows/deploy-lambdas.yml) builds and deploys
-the backend to dev. [Promote to Production](.github/workflows/promote-to-prod.yml)
-uses Lambda artifacts from a successful dev deployment. The
-[admin frontend workflow](.github/workflows/deploy-frontend.yml) deploys the
-static files to Cloudflare Pages. Use `make help` for manual deployment targets.
+[Deploy AWS Lambdas](.github/workflows/deploy-lambdas.yml) builds from
+`main` and deploys to dev. After verifying dev, pass its run ID to
+[Promote to Production](.github/workflows/promote-to-prod.yml) to reuse the
+Lambda artifacts and matching SAM template. The
+[admin frontend workflow](.github/workflows/deploy-frontend.yml) deploys to the
+`dev` Cloudflare Pages preview on pushes to `main`. To publish the same frontend
+revision in production, dispatch it with `environment=prod` and the successful
+dev frontend run ID. Use `make help` for manual deployment targets.
 
 See the [AWS deployment guide](docs/deployment-guide-aws.md) for AWS setup and
 troubleshooting. `make build-lambdas` requires `cargo-lambda` and

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'admin-frontend/**'
+      - '.github/scripts/verify-dev-run.sh'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
     inputs:
@@ -16,12 +17,18 @@ on:
         options:
           - dev
           - prod
+      run_id:
+        description: 'Successful dev frontend run ID, required for prod'
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
+    name: ${{ inputs.environment == 'prod' && 'deploy-prod' || 'deploy-dev' }}
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
@@ -30,17 +37,38 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify dev frontend run
+        if: inputs.environment == 'prod'
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if [ -z "$RUN_ID" ]; then
+            echo 'A successful dev frontend run ID is required for production.' >&2
+            exit 1
+          fi
+          bash .github/scripts/verify-dev-run.sh deploy-frontend.yml "$RUN_ID"
+
+      - name: Check out the dev frontend revision
+        if: inputs.environment == 'prod'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.sha }}
+          path: release
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           package-manager-cache: false
 
       - name: Install locked Wrangler
-        working-directory: admin-frontend
+        working-directory: ${{ inputs.environment == 'prod' && 'release/admin-frontend' || 'admin-frontend' }}
         run: npm ci --ignore-scripts
 
       - name: Deploy to Cloudflare Pages
-        working-directory: admin-frontend
+        working-directory: ${{ inputs.environment == 'prod' && 'release/admin-frontend' || 'admin-frontend' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -48,6 +76,7 @@ jobs:
           PAGES_BRANCH: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
         run: |
           publish_dir=$(mktemp -d)
+          trap 'rm -rf "$publish_dir"' EXIT
           cp app.js config.js index.html "$publish_dir/"
           ./node_modules/.bin/wrangler pages deploy "$publish_dir" \
             --project-name="$PAGES_PROJECT_NAME" --branch="$PAGES_BRANCH"

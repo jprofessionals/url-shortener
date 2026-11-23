@@ -8,60 +8,75 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+
 env:
   AWS_REGION: eu-north-1
 
 jobs:
   promote:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: prod
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Get latest successful run ID
-        if: inputs.run_id == ''
-        id: get-run
+      - name: Verify dev run
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          RUN_ID=$(gh run list --workflow=deploy-lambdas.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-          echo "Using artifacts from run: $RUN_ID"
+          RUN_ID: ${{ inputs.run_id }}
+        run: bash .github/scripts/verify-dev-run.sh deploy-lambdas.yml "$RUN_ID"
 
-      - name: Download artifacts from previous run
-        uses: actions/download-artifact@v4
+      - name: Check out the matching SAM template
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.sha }}
+          path: release
+
+      - name: Download verified run artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lambda-artifacts
-          path: infra/sam/artifacts/
+          path: release/infra/sam/artifacts/
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.run_id || steps.get-run.outputs.run_id }}
+          run-id: ${{ steps.release.outputs.run_id }}
+          digest-mismatch: error
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Assume the environment deploy role
+        if: vars.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure existing AWS access key during OIDC migration
+        if: vars.AWS_DEPLOY_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup SAM CLI
-        uses: aws-actions/setup-sam@v2
+        uses: aws-actions/setup-sam@341eee193f458fa5aae5d52c94b0c5cf3a1c5a52 # v3
 
       - name: Deploy to prod
-        working-directory: infra/sam
-        run: |
-          sam deploy \
-            --stack-name url-shortener-prod \
-            --template-file template.yaml \
-            --resolve-s3 \
-            --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              StageName=prod \
-              AllowedDomain=${{ vars.ALLOWED_DOMAIN }} \
-              GoogleOAuthClientId=${{ vars.GOOGLE_OAUTH_CLIENT_ID }} \
-              ShortlinkDomain=${{ vars.SHORTLINK_DOMAIN }} \
-              CorsAllowOrigin=${{ vars.CORS_ALLOW_ORIGIN }} \
-              CustomDomainName=${{ vars.CUSTOM_DOMAIN_NAME }} \
-              CustomDomainCertificateArn=${{ vars.CUSTOM_DOMAIN_CERT_ARN }} \
-              AdminEmails=${{ vars.ADMIN_EMAILS }}
+        env:
+          ALLOWED_DOMAIN: ${{ vars.ALLOWED_DOMAIN }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          SHORTLINK_DOMAIN: ${{ vars.SHORTLINK_DOMAIN }}
+          CORS_ALLOW_ORIGIN: ${{ vars.CORS_ALLOW_ORIGIN }}
+          CUSTOM_DOMAIN_NAME: ${{ vars.CUSTOM_DOMAIN_NAME }}
+          CUSTOM_DOMAIN_CERT_ARN: ${{ vars.CUSTOM_DOMAIN_CERT_ARN }}
+          ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS || vars.ADMIN_EMAILS }}
+          SAM_EXECUTION_ROLE_ARN: ${{ vars.SAM_EXECUTION_ROLE_ARN }}
+        run: bash .github/scripts/deploy-sam.sh prod release/infra/sam
