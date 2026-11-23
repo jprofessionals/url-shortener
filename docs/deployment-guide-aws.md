@@ -359,42 +359,49 @@ curl -i https://dev-sc.jpro.dev/api/links
 curl -i https://sc.jpro.dev/test123
 ```
 
-## Admin Frontend Deployment (Cloudflare Pages)
+## GitHub Actions AWS deployment roles
 
-The admin frontend (`admin-frontend/`) can be deployed to Cloudflare Pages:
+Configure an AWS OIDC provider for `https://token.actions.githubusercontent.com`
+with audience `sts.amazonaws.com`. Use separate IAM deploy roles for the
+GitHub environments `dev` and `prod`. Their trust policies should require that
+audience and the exact subject `repo:jprofessionals/url-shortener:environment:dev`
+or `repo:jprofessionals/url-shortener:environment:prod`, respectively.
+Restrict both GitHub environments to deployments from `main`.
 
-### Step 1: Update config.js for Production
+Set `AWS_DEPLOY_ROLE_ARN` on each environment. Scope its CloudFormation access
+to the corresponding `url-shortener-dev` or `url-shortener-prod` stack and its
+artifact writes to the matching prefix in the SAM-managed S3 bucket. Give each
+environment its own CloudFormation execution role if separating deploy and
+resource-management permissions. Set `SAM_EXECUTION_ROLE_ARN` on the environment
+and grant the deploy role `iam:PassRole` only for that role. The execution role
+needs the resource permissions used by the SAM template for its stage. SAM's
+managed bucket and stack must already be bootstrapped for narrowly scoped roles.
 
-Create environment-specific configs or update before deploy:
-```javascript
-window.APP_CONFIG = {
-  API_BASE: "https://dev-sc.jpro.dev",  // or https://sc.jpro.dev for prod
-  GOOGLE_CLIENT_ID: "333449424444-bb173lfcpqurosj5o2b39lmkpovnceqi.apps.googleusercontent.com",
-  AUTH_DISABLED: false
-};
-```
+The current roles deploy code and configuration to the two existing Lambda
+functions in their environment. They can pass the existing Lambda runtime roles
+through CloudFormation. They have no direct DynamoDB data access. Have an AWS
+operator review template changes that add resources or change runtime IAM
+policies before deploying them.
 
-### Step 2: Deploy to Cloudflare Pages
+Use the environment secret `ADMIN_EMAILS` for administrator addresses.
+Verify OIDC in dev and then prod before removing the legacy
+`AWS_ACCESS_KEY_ID` repository variable and `AWS_SECRET_ACCESS_KEY` secret.
+The workflows use the legacy credential while an environment has no deploy role.
+See [GitHub's AWS OIDC setup](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
-**Option A: Cloudflare Dashboard**
-1. Go to Cloudflare Dashboard → Workers & Pages → Create
-2. Select "Pages" → "Upload assets"
-3. Upload the contents of `admin-frontend/`
-4. Set custom domain: `dev-admin-sc.jpro.dev`
+## Admin frontend deployment
 
-**Option B: Wrangler CLI**
-```bash
-cd admin-frontend
-npx wrangler pages deploy . --project-name=url-shortener-admin-dev
-# Then add custom domain in dashboard
-```
+The `url-shortener-admin` Cloudflare Pages project uses the `main` branch for
+production and the `dev` branch for dev previews. The dev preview is available
+at `https://dev.url-shortener-admin-8ln.pages.dev`. In Cloudflare DNS, point the
+proxied `dev-admin-sc.jpro.dev` CNAME at
+`dev.url-shortener-admin-8ln.pages.dev` to serve the preview on the
+existing dev admin origin. This origin must match the dev API's CORS setting
+and be registered as an authorized JavaScript origin for Google Sign-In.
+See [Cloudflare's custom branch aliases](https://developers.cloudflare.com/pages/how-to/custom-branch-aliases/).
 
-### Step 3: Configure Custom Domain
-
-In Cloudflare Pages project settings:
-1. Go to Custom domains
-2. Add `dev-admin-sc.jpro.dev`
-3. Cloudflare automatically configures DNS if on same account
+Use `make deploy-frontend PAGES_BRANCH=dev` for a manual dev preview or the
+GitHub Actions workflow to deploy and promote from `main`.
 
 ## Monitoring & Logs
 

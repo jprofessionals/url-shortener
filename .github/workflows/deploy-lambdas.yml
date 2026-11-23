@@ -11,26 +11,36 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'infra/sam/**'
+      - 'Makefile'
+      - '.github/scripts/deploy-sam.sh'
       - '.github/workflows/deploy-lambdas.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   AWS_REGION: eu-north-1
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
+        with:
+          toolchain: stable
 
       - name: Install cargo-lambda
-        run: pip install cargo-lambda
+        run: pip install cargo-lambda==1.9.2
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -44,51 +54,57 @@ jobs:
         run: make build-lambdas
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lambda-artifacts
           path: infra/sam/artifacts/
+          if-no-files-found: error
           retention-days: 7
 
   deploy-dev:
     needs: build
     runs-on: ubuntu-latest
     environment: dev
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lambda-artifacts
           path: infra/sam/artifacts/
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Assume the environment deploy role
+        if: vars.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure existing AWS access key during OIDC migration
+        if: vars.AWS_DEPLOY_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup SAM CLI
-        uses: aws-actions/setup-sam@v2
+        uses: aws-actions/setup-sam@341eee193f458fa5aae5d52c94b0c5cf3a1c5a52 # v3
 
       - name: Deploy to dev
-        working-directory: infra/sam
-        run: |
-          sam deploy \
-            --stack-name url-shortener-dev \
-            --template-file template.yaml \
-            --resolve-s3 \
-            --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              StageName=dev \
-              AllowedDomain=${{ vars.ALLOWED_DOMAIN }} \
-              GoogleOAuthClientId=${{ vars.GOOGLE_OAUTH_CLIENT_ID }} \
-              ShortlinkDomain=${{ vars.SHORTLINK_DOMAIN }} \
-              CorsAllowOrigin=${{ vars.CORS_ALLOW_ORIGIN }} \
-              CustomDomainName=${{ vars.CUSTOM_DOMAIN_NAME }} \
-              CustomDomainCertificateArn=${{ vars.CUSTOM_DOMAIN_CERT_ARN }} \
-              AdminEmails=${{ vars.ADMIN_EMAILS }}
+        env:
+          ALLOWED_DOMAIN: ${{ vars.ALLOWED_DOMAIN }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          SHORTLINK_DOMAIN: ${{ vars.SHORTLINK_DOMAIN }}
+          CORS_ALLOW_ORIGIN: ${{ vars.CORS_ALLOW_ORIGIN }}
+          CUSTOM_DOMAIN_NAME: ${{ vars.CUSTOM_DOMAIN_NAME }}
+          CUSTOM_DOMAIN_CERT_ARN: ${{ vars.CUSTOM_DOMAIN_CERT_ARN }}
+          ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS || vars.ADMIN_EMAILS }}
+          SAM_EXECUTION_ROLE_ARN: ${{ vars.SAM_EXECUTION_ROLE_ARN }}
+        run: bash .github/scripts/deploy-sam.sh dev infra/sam
