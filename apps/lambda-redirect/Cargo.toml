@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 domain = { path = "../../domain" }
 aws-dynamo = { path = "../../adapters/aws-dynamo" }
+form_urlencoded = "1.2"
 http-common = { path = "../../shared/http-common", features = ["lambda"] }
 lambda_http = "1.0.1"
 serde = { workspace = true, features = ["derive"] }

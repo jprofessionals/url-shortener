@@ -1494,6 +1494,7 @@ version = "0.1.0"
 dependencies = [
  "aws-dynamo",
  "domain",
+ "form_urlencoded",
  "http-common",
  "lambda_http",
  "qrcode",
