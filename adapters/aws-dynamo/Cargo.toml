@@ -7,6 +7,6 @@ edition.workspace = true
 domain = { path = "../../domain" }
 # Keep AWS deps local to this crate; api-server only pulls them via feature
 aws-config = "1"
-aws-sdk-dynamodb = "1"
+aws-sdk-dynamodb = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-types = "1"
 tokio.workspace = true

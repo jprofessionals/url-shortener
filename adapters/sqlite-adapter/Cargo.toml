@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 domain = { path = "../../domain" }
-rusqlite = { version = "0.31", features = ["bundled", "functions", "chrono"] }
+rusqlite = { version = "0.41", features = ["bundled", "functions", "chrono"] }
 
 [dev-dependencies]
 tempfile = "3"

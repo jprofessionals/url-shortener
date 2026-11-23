@@ -352,17 +352,15 @@ mod tests {
         std::env::remove_var("GOOGLE_AUTH_INSECURE_SKIP_SIGNATURE");
 
         // Generate RSA keypair
-        use rsa::pkcs1::EncodeRsaPrivateKey;
-        use rsa::RsaPrivateKey;
-        let mut rng = rand::thread_rng();
-        let bits = 2048;
-        let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("keys");
-        let pub_key = priv_key.to_public_key();
+        use aws_lc_rs::{rand::SystemRandom, rsa::KeySize, signature::KeyPair};
+        let priv_key = aws_lc_rs::rsa::KeyPair::generate(KeySize::Rsa2048).expect("keys");
+        let pub_key = priv_key.public_key();
 
         // Build JWKS from RSA components (n, e) base64url
-        use rsa::traits::PublicKeyParts;
-        let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pub_key.n().to_bytes_be());
-        let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pub_key.e().to_bytes_be());
+        let n = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(pub_key.modulus().big_endian_without_leading_zero());
+        let e = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(pub_key.exponent().big_endian_without_leading_zero());
         let jwks_json = serde_json::json!({
             "keys": [ { "kid": "test1", "kty": "RSA", "alg": "RS256", "n": n, "e": e } ]
         })
@@ -399,13 +397,20 @@ mod tests {
             alg: jsonwebtoken::Algorithm::RS256,
             ..Default::default()
         };
-        let pem = priv_key.to_pkcs1_pem(Default::default()).unwrap();
-        let token_ok = jsonwebtoken::encode(
-            &header,
-            &claims,
-            &jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
-        )
-        .unwrap();
+        let base64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let header = base64.encode(serde_json::to_vec(&header).unwrap());
+        let claims = base64.encode(serde_json::to_vec(&claims).unwrap());
+        let signing_input = format!("{header}.{claims}");
+        let mut signature = vec![0; 256];
+        priv_key
+            .sign(
+                &aws_lc_rs::signature::RSA_PKCS1_SHA256,
+                &SystemRandom::new(),
+                signing_input.as_bytes(),
+                &mut signature,
+            )
+            .unwrap();
+        let token_ok = format!("{signing_input}.{}", base64.encode(signature));
 
         // Success
         let out = verify_async(&token_ok, "client-ok", "acme.com")
